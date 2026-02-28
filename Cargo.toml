@@ -1,0 +1,26 @@
+[package]
+name = "hdbscan-rs"
+version = "0.1.0"
+edition = "2021"
+description = "HDBSCAN clustering algorithm, compatible with scikit-learn"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "hdbscan_rs"
+
+[dependencies]
+ndarray = "0.16"
+num-traits = "0.2"
+thiserror = "2"
+ordered-float = "4"
+log = "0.4"
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+approx = "0.5"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+
+[features]
+default = []
+serde = ["dep:serde"]
