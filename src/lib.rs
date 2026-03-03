@@ -8,6 +8,7 @@ pub mod core_distance;
 pub mod distance;
 pub mod error;
 pub mod kdtree;
+pub mod mst;
 pub mod params;
 pub mod types;
 pub mod union_find;
