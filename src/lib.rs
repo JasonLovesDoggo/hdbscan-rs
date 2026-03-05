@@ -4,6 +4,8 @@
 //! Clustering of Applications with Noise) algorithm, producing results
 //! compatible with scikit-learn's HDBSCAN.
 
+pub mod cluster_selection;
+pub mod condensed_tree;
 pub mod core_distance;
 pub mod distance;
 pub mod error;
