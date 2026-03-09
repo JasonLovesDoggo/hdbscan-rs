@@ -28,6 +28,7 @@ pub mod distance;
 pub mod error;
 pub mod hdbscan;
 pub mod kdtree;
+pub mod kdtree_bounded;
 pub mod labels;
 pub mod linkage;
 pub mod membership;
