@@ -1,5 +1,6 @@
 use ndarray::ArrayView1;
 
+use super::chebyshev::chebyshev_distance;
 use super::euclidean::euclidean_distance;
 use super::manhattan::manhattan_distance;
 
@@ -12,7 +13,7 @@ pub fn minkowski_distance(a: &ArrayView1<f64>, b: &ArrayView1<f64>, p: f64) -> f
         return euclidean_distance(a, b);
     }
     if p.is_infinite() {
-        return a.iter().zip(b.iter()).map(|(&x, &y)| (x - y).abs()).fold(0.0_f64, f64::max);
+        return chebyshev_distance(a, b);
     }
     a.iter()
         .zip(b.iter())

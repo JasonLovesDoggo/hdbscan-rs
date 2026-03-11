@@ -1,3 +1,4 @@
+pub mod chebyshev;
 pub mod cosine;
 pub mod euclidean;
 pub mod manhattan;
