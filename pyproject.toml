@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "hdbscan-rs"
-version = "0.3.0"
+version = "0.4.0"
 description = "High-performance HDBSCAN clustering, compatible with scikit-learn"
 readme = "README_PYTHON.md"
 license = "MIT OR Apache-2.0"
