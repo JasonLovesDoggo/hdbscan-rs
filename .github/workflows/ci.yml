@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [stable, nightly]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --all-features
+      - name: Test
+        run: cargo test
+      - name: Test with Python feature
+        run: cargo check --features python
+      - name: Clippy
+        if: matrix.rust == 'stable'
+        run: cargo clippy -- -D warnings
+      - name: Format check
+        if: matrix.rust == 'stable'
+        run: cargo fmt -- --check
+
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install maturin and numpy
+        run: pip install maturin numpy
+      - name: Build and install
+        run: maturin develop --release
+      - name: Run Python tests
+        run: python tests/test_python.py
