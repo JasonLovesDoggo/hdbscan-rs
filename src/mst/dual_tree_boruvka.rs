@@ -20,8 +20,10 @@ use crate::union_find::UnionFind;
 use ndarray::ArrayView1;
 
 /// Per-component nearest cross-component neighbor.
+/// Stores squared MR distance to avoid sqrt in the inner loop.
 #[derive(Clone, Copy)]
 struct ComponentBest {
+    mr_dist_sq: f64,
     mr_dist: f64,
     from: usize,
     to: usize,
@@ -50,6 +52,7 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
 
     let mut component_best: Vec<ComponentBest> = vec![
         ComponentBest {
+            mr_dist_sq: f64::INFINITY,
             mr_dist: f64::INFINITY,
             from: 0,
             to: 0,
@@ -66,23 +69,27 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
                 continue;
             }
             let core_max = f64::max(core_dists[i], core_dists[j]);
+            let core_max_sq = core_max * core_max;
             let d_sq = tree.dist_sq(i, j);
-            let mr = if alpha == 1.0 && d_sq <= core_max * core_max {
-                core_max
+            let (mr, mr_sq) = if alpha == 1.0 && d_sq <= core_max_sq {
+                (core_max, core_max_sq)
             } else {
                 let dist = d_sq.sqrt();
                 let scaled = if alpha != 1.0 { dist / alpha } else { dist };
-                f64::max(core_max, scaled)
+                let mr = f64::max(core_max, scaled);
+                (mr, mr * mr)
             };
-            if mr < component_best[i].mr_dist {
+            if mr_sq < component_best[i].mr_dist_sq {
                 component_best[i] = ComponentBest {
+                    mr_dist_sq: mr_sq,
                     mr_dist: mr,
                     from: i,
                     to: j,
                 };
             }
-            if mr < component_best[j].mr_dist {
+            if mr_sq < component_best[j].mr_dist_sq {
                 component_best[j] = ComponentBest {
+                    mr_dist_sq: mr_sq,
                     mr_dist: mr,
                     from: j,
                     to: i,
@@ -104,6 +111,7 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
     while n_components > 1 {
         // Reset component bests
         for best in component_best.iter_mut() {
+            best.mr_dist_sq = f64::INFINITY;
             best.mr_dist = f64::INFINITY;
         }
 
@@ -287,19 +295,20 @@ fn dual_tree_search<T: SpatialTree>(
         return;
     }
 
-    // === Pruning 2: MR distance lower bound ===
+    // === Pruning 2: MR distance lower bound (squared) ===
     let min_dist_sq = tree.min_dist_sq_node_to_node(query_node, ref_node);
-    let min_dist = min_dist_sq.sqrt();
-    let min_dist_scaled = if alpha != 1.0 {
-        min_dist / alpha
+    let min_core_q = node_min_core[query_node];
+    let min_core_r = node_min_core[ref_node];
+    let min_core_max = f64::max(min_core_q, min_core_r);
+    let min_core_max_sq = min_core_max * min_core_max;
+    // MR_lower² = max(min_core_max², min_dist_sq) when alpha == 1.0
+    let mr_lower_sq = if alpha == 1.0 {
+        f64::max(min_core_max_sq, min_dist_sq)
     } else {
-        min_dist
+        let min_dist = min_dist_sq.sqrt();
+        let mr_lower = f64::max(min_core_max, min_dist / alpha);
+        mr_lower * mr_lower
     };
-
-    let mr_lower = f64::max(
-        node_min_core[query_node],
-        f64::max(node_min_core[ref_node], min_dist_scaled),
-    );
 
     // Check if this lower bound can improve ANY component in the query node.
     let q_node = &nodes[query_node];
@@ -307,7 +316,7 @@ fn dual_tree_search<T: SpatialTree>(
     let mut can_prune = true;
     for &idx in &sorted[q_node.idx_start()..q_node.idx_end()] {
         let comp = point_component[idx];
-        if mr_lower < component_best[comp].mr_dist {
+        if mr_lower_sq < component_best[comp].mr_dist_sq {
             can_prune = false;
             break;
         }
@@ -326,9 +335,10 @@ fn dual_tree_search<T: SpatialTree>(
         for &qi in q_points {
             let comp_q = point_component[qi];
             let core_q = core_dists[qi];
+            let core_q_sq = core_q * core_q;
 
-            // Core distance shortcut: can't beat current best
-            if core_q >= component_best[comp_q].mr_dist {
+            // Core distance shortcut: can't beat current best (squared comparison)
+            if core_q_sq >= component_best[comp_q].mr_dist_sq {
                 continue;
             }
 
@@ -340,26 +350,35 @@ fn dual_tree_search<T: SpatialTree>(
 
                 let core_r = core_dists[ri];
                 let core_max = f64::max(core_q, core_r);
+                let core_max_sq = core_max * core_max;
 
-                // Lazy sqrt: avoid sqrt when core distances dominate
                 let d_sq = tree.dist_sq(qi, ri);
-                let mr = if alpha == 1.0 && d_sq <= core_max * core_max {
-                    core_max
+                // MR² = max(core_max², d²) when alpha == 1.0
+                let (mr, mr_sq) = if alpha == 1.0 {
+                    if d_sq <= core_max_sq {
+                        (core_max, core_max_sq)
+                    } else {
+                        let dist = d_sq.sqrt();
+                        (dist, d_sq)
+                    }
                 } else {
                     let dist = d_sq.sqrt();
-                    let scaled = if alpha != 1.0 { dist / alpha } else { dist };
-                    f64::max(core_max, scaled)
+                    let scaled = dist / alpha;
+                    let mr = f64::max(core_max, scaled);
+                    (mr, mr * mr)
                 };
 
-                if mr < component_best[comp_q].mr_dist {
+                if mr_sq < component_best[comp_q].mr_dist_sq {
                     component_best[comp_q] = ComponentBest {
+                        mr_dist_sq: mr_sq,
                         mr_dist: mr,
                         from: qi,
                         to: ri,
                     };
                 }
-                if mr < component_best[comp_r].mr_dist {
+                if mr_sq < component_best[comp_r].mr_dist_sq {
                     component_best[comp_r] = ComponentBest {
+                        mr_dist_sq: mr_sq,
                         mr_dist: mr,
                         from: ri,
                         to: qi,
