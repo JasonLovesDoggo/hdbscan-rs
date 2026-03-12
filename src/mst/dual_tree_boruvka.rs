@@ -21,10 +21,10 @@ use ndarray::ArrayView1;
 
 /// Per-component nearest cross-component neighbor.
 /// Stores squared MR distance to avoid sqrt in the inner loop.
+/// mr_dist is computed lazily (sqrt of mr_dist_sq) only at edge collection time.
 #[derive(Clone, Copy)]
 struct ComponentBest {
     mr_dist_sq: f64,
-    mr_dist: f64,
     from: usize,
     to: usize,
 }
@@ -46,6 +46,9 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
         .as_slice()
         .expect("core distances contiguous");
 
+    // Precompute squared core distances to avoid repeated multiplications in inner loop
+    let core_dists_sq: Vec<f64> = core_dists.iter().map(|&d| d * d).collect();
+
     let mut uf = UnionFind::new(n);
     let mut edges = Vec::with_capacity(n - 1);
     let mut n_components = n;
@@ -53,7 +56,6 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
     let mut component_best: Vec<ComponentBest> = vec![
         ComponentBest {
             mr_dist_sq: f64::INFINITY,
-            mr_dist: f64::INFINITY,
             from: 0,
             to: 0,
         };
@@ -68,21 +70,20 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
             if j == i {
                 continue;
             }
-            let core_max = f64::max(core_dists[i], core_dists[j]);
-            let core_max_sq = core_max * core_max;
+            let core_max_sq = f64::max(core_dists_sq[i], core_dists_sq[j]);
             let d_sq = tree.dist_sq(i, j);
-            let (mr, mr_sq) = if alpha == 1.0 && d_sq <= core_max_sq {
-                (core_max, core_max_sq)
+            let mr_sq = if alpha == 1.0 {
+                f64::max(core_max_sq, d_sq)
             } else {
                 let dist = d_sq.sqrt();
-                let scaled = if alpha != 1.0 { dist / alpha } else { dist };
+                let scaled = dist / alpha;
+                let core_max = core_max_sq.sqrt();
                 let mr = f64::max(core_max, scaled);
-                (mr, mr * mr)
+                mr * mr
             };
             if mr_sq < component_best[i].mr_dist_sq {
                 component_best[i] = ComponentBest {
                     mr_dist_sq: mr_sq,
-                    mr_dist: mr,
                     from: i,
                     to: j,
                 };
@@ -90,7 +91,6 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
             if mr_sq < component_best[j].mr_dist_sq {
                 component_best[j] = ComponentBest {
                     mr_dist_sq: mr_sq,
-                    mr_dist: mr,
                     from: j,
                     to: i,
                 };
@@ -109,11 +109,11 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
     let mut point_component = vec![0usize; n];
 
     let mut round = 0;
+    let mut merge_edges: Vec<(f64, usize, usize)> = Vec::new();
     while n_components > 1 {
         // Reset component bests
         for best in component_best.iter_mut() {
             best.mr_dist_sq = f64::INFINITY;
-            best.mr_dist = f64::INFINITY;
         }
 
         // Cache component IDs for all points (avoids repeated uf.find() in traversal)
@@ -134,6 +134,7 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
                 0,
                 0,
                 core_dists,
+                &core_dists_sq,
                 &node_min_core,
                 &point_component,
                 &mut component_best,
@@ -144,15 +145,15 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
 
         // Collect and merge cheapest edges
         let mut merged_any = false;
-        let mut merge_edges: Vec<(f64, usize, usize)> = Vec::new();
+        merge_edges.clear();
 
         for i in 0..n {
             if uf.find(i) != i {
                 continue;
             }
             let best = &component_best[i];
-            if best.mr_dist < f64::INFINITY {
-                merge_edges.push((best.mr_dist, best.from, best.to));
+            if best.mr_dist_sq < f64::INFINITY {
+                merge_edges.push((best.mr_dist_sq.sqrt(), best.from, best.to));
             }
         }
 
@@ -164,7 +165,7 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
                 .then_with(|| a.2.cmp(&b.2))
         });
 
-        for (weight, from, to) in merge_edges {
+        for &(weight, from, to) in &merge_edges {
             let ca = uf.find(from);
             let cb = uf.find(to);
             if ca != cb {
@@ -259,16 +260,20 @@ fn compute_node_components_cached<T: SpatialTree>(
         } else {
             usize::MAX
         };
-        let right_comp = if right < nodes.len() {
-            compute_node_components_cached(tree, right, point_component, node_component)
-        } else {
+        // Short-circuit: if left subtree has mixed components, parent is also mixed
+        let comp = if left_comp == usize::MAX {
+            // Still need to recurse right so its node_component values are set
+            if right < nodes.len() {
+                compute_node_components_cached(tree, right, point_component, node_component);
+            }
             usize::MAX
-        };
-
-        let comp = if left_comp != usize::MAX && left_comp == right_comp {
-            left_comp
         } else {
-            usize::MAX
+            let right_comp = if right < nodes.len() {
+                compute_node_components_cached(tree, right, point_component, node_component)
+            } else {
+                usize::MAX
+            };
+            if left_comp == right_comp { left_comp } else { usize::MAX }
         };
         node_component[node_idx] = comp;
         comp
@@ -282,6 +287,7 @@ fn dual_tree_search<T: SpatialTree>(
     query_node: usize,
     ref_node: usize,
     core_dists: &[f64],
+    core_dists_sq: &[f64],
     node_min_core: &[f64],
     point_component: &[usize],
     component_best: &mut [ComponentBest],
@@ -339,8 +345,7 @@ fn dual_tree_search<T: SpatialTree>(
 
         for &qi in q_points {
             let comp_q = point_component[qi];
-            let core_q = core_dists[qi];
-            let core_q_sq = core_q * core_q;
+            let core_q_sq = core_dists_sq[qi];
             let best_q_sq = component_best[comp_q].mr_dist_sq;
 
             // Core distance shortcut: can't beat current best (squared comparison)
@@ -354,9 +359,7 @@ fn dual_tree_search<T: SpatialTree>(
                     continue;
                 }
 
-                let core_r = core_dists[ri];
-                let core_max = f64::max(core_q, core_r);
-                let core_max_sq = core_max * core_max;
+                let core_max_sq = f64::max(core_q_sq, core_dists_sq[ri]);
 
                 // If core_max² already exceeds both component bests, skip distance
                 let best_r_sq = component_best[comp_r].mr_dist_sq;
@@ -366,24 +369,19 @@ fn dual_tree_search<T: SpatialTree>(
 
                 let d_sq = tree.dist_sq(qi, ri);
                 // MR² = max(core_max², d²) when alpha == 1.0
-                let (mr, mr_sq) = if alpha == 1.0 {
-                    if d_sq <= core_max_sq {
-                        (core_max, core_max_sq)
-                    } else {
-                        let dist = d_sq.sqrt();
-                        (dist, d_sq)
-                    }
+                let mr_sq = if alpha == 1.0 {
+                    f64::max(core_max_sq, d_sq)
                 } else {
                     let dist = d_sq.sqrt();
                     let scaled = dist / alpha;
+                    let core_max = core_max_sq.sqrt();
                     let mr = f64::max(core_max, scaled);
-                    (mr, mr * mr)
+                    mr * mr
                 };
 
                 if mr_sq < component_best[comp_q].mr_dist_sq {
                     component_best[comp_q] = ComponentBest {
                         mr_dist_sq: mr_sq,
-                        mr_dist: mr,
                         from: qi,
                         to: ri,
                     };
@@ -391,7 +389,6 @@ fn dual_tree_search<T: SpatialTree>(
                 if mr_sq < component_best[comp_r].mr_dist_sq {
                     component_best[comp_r] = ComponentBest {
                         mr_dist_sq: mr_sq,
-                        mr_dist: mr,
                         from: ri,
                         to: qi,
                     };
@@ -413,6 +410,7 @@ fn dual_tree_search<T: SpatialTree>(
                 query_node,
                 first,
                 core_dists,
+                core_dists_sq,
                 node_min_core,
                 point_component,
                 component_best,
@@ -426,6 +424,7 @@ fn dual_tree_search<T: SpatialTree>(
                 query_node,
                 second,
                 core_dists,
+                core_dists_sq,
                 node_min_core,
                 point_component,
                 component_best,
@@ -443,6 +442,7 @@ fn dual_tree_search<T: SpatialTree>(
                 q_left,
                 ref_node,
                 core_dists,
+                core_dists_sq,
                 node_min_core,
                 point_component,
                 component_best,
@@ -456,6 +456,7 @@ fn dual_tree_search<T: SpatialTree>(
                 q_right,
                 ref_node,
                 core_dists,
+                core_dists_sq,
                 node_min_core,
                 point_component,
                 component_best,

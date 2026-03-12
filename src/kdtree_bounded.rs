@@ -187,21 +187,16 @@ impl BoundedKdTree {
         let b_max = b.bbox_max.as_slice();
         let dim = self.dim;
         let mut dist_sq = 0.0f64;
+        // Branchless: for each dim, gap = max(a_lo - b_hi, 0) + max(b_lo - a_hi, 0).
+        // At most one term is non-zero. Compiles to maxpd + vfmadd (SIMD-friendly).
         for d in 0..dim {
             unsafe {
                 let a_lo = *a_min.get_unchecked(d);
+                let a_hi = *a_max.get_unchecked(d);
+                let b_lo = *b_min.get_unchecked(d);
                 let b_hi = *b_max.get_unchecked(d);
-                if a_lo > b_hi {
-                    let diff = a_lo - b_hi;
-                    dist_sq += diff * diff;
-                } else {
-                    let b_lo = *b_min.get_unchecked(d);
-                    let a_hi = *a_max.get_unchecked(d);
-                    if b_lo > a_hi {
-                        let diff = b_lo - a_hi;
-                        dist_sq += diff * diff;
-                    }
-                }
+                let gap = f64::max(a_lo - b_hi, 0.0) + f64::max(b_lo - a_hi, 0.0);
+                dist_sq += gap * gap;
             }
         }
         dist_sq
@@ -256,16 +251,9 @@ impl BoundedKdTree {
             unsafe {
                 let q = *query.get_unchecked(d);
                 let lo = *bbox_min.get_unchecked(d);
-                if q < lo {
-                    let diff = lo - q;
-                    min_dist_sq += diff * diff;
-                } else {
-                    let hi = *bbox_max.get_unchecked(d);
-                    if q > hi {
-                        let diff = q - hi;
-                        min_dist_sq += diff * diff;
-                    }
-                }
+                let hi = *bbox_max.get_unchecked(d);
+                let gap = f64::max(lo - q, 0.0) + f64::max(q - hi, 0.0);
+                min_dist_sq += gap * gap;
             }
         }
         if heap.is_full() && min_dist_sq >= heap.max_dist_sq() {

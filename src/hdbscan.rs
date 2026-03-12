@@ -205,12 +205,11 @@ impl Hdbscan {
         let use_prims = !matches!(self.params.metric, Metric::Euclidean) || n <= threshold;
 
         if use_prims {
-            // Fused core+Prim's: compute pairwise distances once, cache in matrix.
-            // Only beneficial when matrix fits in L3 cache (~32MB) so Prim's lookups are fast.
-            // At dim > 16, per-distance cost is high enough to make the savings worthwhile.
-            let matrix_bytes = n * n * 8;
+            // Fused core+Prim's: compute all pairwise distances once (GEMM for high dim,
+            // SIMD for low dim), extract core distances, then run Prim's with O(1) lookups.
+            // At dim > 16, per-distance cost makes sharing computation worthwhile.
             if matches!(self.params.metric, Metric::Euclidean) && self.params.alpha == 1.0
-                && dim > 16 && matrix_bytes <= 48_000_000 {
+                && dim > 16 {
                 mst::prim::fused_core_and_prim(data, min_samples)
             } else {
                 let (core_distances, nn_indices) =

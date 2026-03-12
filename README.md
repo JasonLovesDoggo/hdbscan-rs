@@ -41,16 +41,16 @@ Single-thread, best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Comp
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|
-| 1Kx2D | 9.0 ms | 14.1 ms | **2.1 ms** | 4.4x | 6.8x |
-| 5Kx2D | 125 ms | 80.9 ms | **12.5 ms** | 10.0x | 6.5x |
-| 10Kx2D | 463 ms | 179 ms | **27.2 ms** | 17.0x | 6.6x |
-| 50Kx2D | 12,947 ms | 1,068 ms | **180 ms** | 71.9x | 5.9x |
-| 5Kx10D | 251 ms | 137 ms | **110 ms** | 2.3x | 1.2x |
-| 5Kx50D | 943 ms | 393 ms | 483 ms | 2.0x | 0.8x |
-| 1Kx256D | 237 ms | 229 ms | **48 ms** | 5.0x | 4.8x |
-| 500x1536D | 414 ms | 445 ms | **61 ms** | 6.7x | 7.2x |
+| 1Kx2D | 9.9 ms | 13.3 ms | **1.9 ms** | 5.1x | 6.8x |
+| 5Kx2D | 125 ms | 82.3 ms | **12.0 ms** | 10.4x | 6.9x |
+| 10Kx2D | 468 ms | 178 ms | **26.3 ms** | 17.8x | 6.8x |
+| 50Kx2D | 12,906 ms | 1,029 ms | **167 ms** | 77.4x | 6.2x |
+| 5Kx10D | 245 ms | 136 ms | **99 ms** | 2.5x | 1.4x |
+| 5Kx50D | 922 ms | 383 ms | **326 ms** | 2.8x | 1.2x |
+| 1Kx256D | 239 ms | 226 ms | **22 ms** | 11.0x | 10.4x |
+| 500x1536D | 417 ms | 441 ms | **24 ms** | 17.3x | 18.4x |
 
-Memory usage is **5-60x lower** than Python implementations (no interpreter/NumPy overhead).
+Memory usage is **3-60x lower** than Python implementations (no interpreter/NumPy overhead), except for medium-dim fused GEMM path which trades memory for speed.
 
 See [BENCHMARKS.md](BENCHMARKS.md) for full results, machine specs, methodology, and analysis.
 

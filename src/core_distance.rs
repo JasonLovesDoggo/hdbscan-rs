@@ -41,10 +41,12 @@ pub fn compute_core_distances_with_nn(
     let dim = data.ncols();
     let (core_distances, nn_indices) = match metric {
         Metric::Euclidean if dim <= KDTREE_KNN_MAX_DIM => {
-            compute_core_distances_bounded_kdtree_with_nn(data, k)
+            let tree = BoundedKdTree::build(data);
+            compute_core_distances_tree(&tree, data, k)
         }
         Metric::Euclidean if dim <= BALLTREE_KNN_MAX_DIM => {
-            compute_core_distances_balltree_with_nn(data, k)
+            let tree = BallTree::build(data);
+            compute_core_distances_tree(&tree, data, k)
         }
         Metric::Euclidean => compute_core_distances_brute_euclidean_with_nn(data, k),
         Metric::Precomputed => compute_core_distances_precomputed_with_nn(data, k),
@@ -62,14 +64,13 @@ pub fn compute_core_distances_with_nn(
     (core_distances, nn_indices)
 }
 
-/// Bounded KD-tree accelerated core distance computation for Euclidean metric.
-/// Uses AABB pruning for better kNN performance than basic KD-tree.
-fn compute_core_distances_bounded_kdtree_with_nn(
+/// Compute core distances and nearest neighbors using any tree implementing CoreDistQuery.
+fn compute_core_distances_tree<T: CoreDistQuery>(
+    tree: &T,
     data: &ArrayView2<f64>,
     k: usize,
 ) -> (Array1<f64>, Vec<usize>) {
     let n = data.nrows();
-    let tree = BoundedKdTree::build(data);
     let mut core_distances = Array1::zeros(n);
     let mut nn_indices = vec![0usize; n];
 
@@ -83,32 +84,31 @@ fn compute_core_distances_bounded_kdtree_with_nn(
     (core_distances, nn_indices)
 }
 
-/// Ball tree accelerated core distance computation for medium-to-high dimensions.
-fn compute_core_distances_balltree_with_nn(
-    data: &ArrayView2<f64>,
-    k: usize,
-) -> (Array1<f64>, Vec<usize>) {
-    let n = data.nrows();
-    let tree = BallTree::build(data);
-    let mut core_distances = Array1::zeros(n);
-    let mut nn_indices = vec![0usize; n];
+/// Trait for tree structures that can answer core distance queries.
+pub trait CoreDistQuery {
+    fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize);
+}
 
-    for i in 0..n {
-        let query = data.row(i);
-        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
-        core_distances[i] = core_dist;
-        nn_indices[i] = nn;
+impl CoreDistQuery for BoundedKdTree {
+    fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
+        self.query_core_dist(query, k, self_idx)
     }
+}
 
-    (core_distances, nn_indices)
+impl CoreDistQuery for BallTree {
+    fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
+        self.query_core_dist(query, k, self_idx)
+    }
 }
 
 /// Brute-force Euclidean kNN for high dimensions where tree pruning is inefficient.
-/// Uses SIMD-accelerated distance computation and a binary max-heap for O(n^2 * d + n^2 * log k).
+/// Uses SIMD-accelerated distance computation and KnnHeap for O(n^2 * d + n^2 * log k).
 fn compute_core_distances_brute_euclidean_with_nn(
     data: &ArrayView2<f64>,
     k: usize,
 ) -> (Array1<f64>, Vec<usize>) {
+    use crate::knn_heap::KnnHeap;
+
     let n = data.nrows();
     let dim = data.ncols();
     let data_contiguous = data.as_standard_layout();
@@ -118,63 +118,16 @@ fn compute_core_distances_brute_euclidean_with_nn(
     let mut nn_indices = vec![0usize; n];
 
     for i in 0..n {
-        // Use a simple bounded max-heap of size k
-        let mut best = Vec::with_capacity(k);
-        let mut max_dist_sq = f64::INFINITY;
-
+        let mut heap = KnnHeap::new(k);
         for j in 0..n {
             let d_sq = crate::simd_distance::squared_euclidean_flat(data_slice, i, j, dim);
-            if best.len() < k {
-                best.push((d_sq, j));
-                if best.len() == k {
-                    // Build max-heap
-                    for idx in (0..k / 2).rev() {
-                        sift_down_f64(&mut best, idx);
-                    }
-                    max_dist_sq = best[0].0;
-                }
-            } else if d_sq < max_dist_sq {
-                best[0] = (d_sq, j);
-                sift_down_f64(&mut best, 0);
-                max_dist_sq = best[0].0;
-            }
+            heap.push(d_sq, j);
         }
-
-        // k-th nearest distance (max in heap)
-        core_distances[i] = max_dist_sq.sqrt();
-
-        // Nearest non-self neighbor
-        best.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        if let Some(&(_, idx)) = best.iter().find(|&&(_, idx)| idx != i) {
-            nn_indices[i] = idx;
-        } else if best.len() > 1 {
-            nn_indices[i] = best[1].1;
-        }
+        core_distances[i] = heap.max_dist_sq().sqrt();
+        nn_indices[i] = heap.nearest_non_self(i);
     }
 
     (core_distances, nn_indices)
-}
-
-/// Sift down for a max-heap of (f64, usize) pairs.
-fn sift_down_f64(heap: &mut [(f64, usize)], mut idx: usize) {
-    let len = heap.len();
-    loop {
-        let left = 2 * idx + 1;
-        let right = 2 * idx + 2;
-        let mut largest = idx;
-        if left < len && heap[left].0 > heap[largest].0 {
-            largest = left;
-        }
-        if right < len && heap[right].0 > heap[largest].0 {
-            largest = right;
-        }
-        if largest != idx {
-            heap.swap(idx, largest);
-            idx = largest;
-        } else {
-            break;
-        }
-    }
 }
 
 fn compute_core_distances_precomputed_with_nn(
@@ -237,26 +190,15 @@ fn compute_core_distances_brute_with_nn(
     (core_distances, nn_indices)
 }
 
-/// Compute core distances using an existing BallTree, also returning nearest neighbors.
+/// Compute core distances using an existing BallTree.
 /// Avoids rebuilding the tree when it's already been constructed for MST.
 pub fn compute_core_distances_with_balltree(
     tree: &BallTree,
     data: &ArrayView2<f64>,
     min_samples: usize,
 ) -> (Array1<f64>, Vec<usize>) {
-    let n = data.nrows();
-    let k = min_samples.min(n);
-    let mut core_distances = Array1::zeros(n);
-    let mut nn_indices = vec![0usize; n];
-
-    for i in 0..n {
-        let query = data.row(i);
-        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
-        core_distances[i] = core_dist;
-        nn_indices[i] = nn;
-    }
-
-    (core_distances, nn_indices)
+    let k = min_samples.min(data.nrows());
+    compute_core_distances_tree(tree, data, k)
 }
 
 /// Compute core distances using an existing BoundedKdTree.
@@ -265,19 +207,8 @@ pub fn compute_core_distances_with_bounded_kdtree(
     data: &ArrayView2<f64>,
     min_samples: usize,
 ) -> (Array1<f64>, Vec<usize>) {
-    let n = data.nrows();
-    let k = min_samples.min(n);
-    let mut core_distances = Array1::zeros(n);
-    let mut nn_indices = vec![0usize; n];
-
-    for i in 0..n {
-        let query = data.row(i);
-        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
-        core_distances[i] = core_dist;
-        nn_indices[i] = nn;
-    }
-
-    (core_distances, nn_indices)
+    let k = min_samples.min(data.nrows());
+    compute_core_distances_tree(tree, data, k)
 }
 
 #[cfg(test)]
@@ -314,7 +245,8 @@ mod tests {
             [5.1, 5.0],
             [5.0, 5.1],
         ];
-        let (cd_kd, _) = compute_core_distances_bounded_kdtree_with_nn(&data.view(), 3);
+        let tree = BoundedKdTree::build(&data.view());
+        let (cd_kd, _) = compute_core_distances_with_bounded_kdtree(&tree, &data.view(), 3);
         let (cd_brute, _) = compute_core_distances_brute_with_nn(&data.view(), &Metric::Euclidean, 3);
         for i in 0..6 {
             assert!(

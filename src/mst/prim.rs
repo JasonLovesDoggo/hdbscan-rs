@@ -47,7 +47,7 @@ pub fn prim_mst_seeded(
 /// - Compact active-set tracking (no branch misprediction from in_tree checks)
 /// - Early-exit pruning: skip distance computation when core distances dominate
 /// - Lazy sqrt: avoid sqrt when core distance is the mutual reachability result
-/// - Precomputed squared norms + dot product for distance: ||a-b||² = ||a||² + ||b||² - 2·a·b
+/// - SIMD-accelerated squared Euclidean distance
 fn prim_mst_euclidean_fast(
     data: &ArrayView2<f64>,
     core_distances: &ArrayView1<f64>,
@@ -114,6 +114,7 @@ fn prim_mst_euclidean_fast(
 
         active.swap_remove(best_pos);
 
+        // Periodically sort active set for cache-friendly data access
         if active.len() > 64 && active.len() % 128 == 0 {
             active.sort_unstable();
         }
@@ -219,9 +220,9 @@ fn prim_mst_euclidean_alpha(
 
 /// Fused core distance + Prim's MST for Euclidean metric with alpha=1.0.
 ///
-/// Computes the full pairwise squared distance matrix once, extracts core distances
-/// from it, then runs Prim's using cached lookups. This halves total distance
-/// computation compared to separate core_distance + Prim's passes.
+/// Computes all pairwise squared distances, extracts core distances via kNN heaps,
+/// then runs Prim's using cached O(1) lookups. Uses GEMM (X@X.T) for high-dim
+/// or point-by-point SIMD for low-dim distance computation.
 pub fn fused_core_and_prim(
     data: &ArrayView2<f64>,
     min_samples: usize,
@@ -234,51 +235,138 @@ pub fn fused_core_and_prim(
         return (ndarray::Array1::zeros(n), vec![]);
     }
 
-    let data_contiguous = data.as_standard_layout();
-    let data_slice = data_contiguous.as_slice().unwrap();
-
-    // Phase 1: Compute upper-triangle pairwise squared distances and build kNN heaps.
-    // Store full symmetric matrix for O(1) Prim's lookups.
-    let mut dist_sq = vec![0.0f64; n * n];
-    // kNN max-heaps of size (k-1): track (k-1) nearest non-self neighbors.
-    // Since self has distance 0, core_dist = max of (k-1) nearest non-self = k-th nearest including self.
-    let heap_k = if k > 1 { k - 1 } else { 0 };
-    let mut heaps: Vec<Vec<(f64, usize)>> = (0..n).map(|_| Vec::with_capacity(heap_k.max(1))).collect();
-
-    for i in 0..n {
-        let off_i = i * n;
-        for j in (i + 1)..n {
-            let d_sq = squared_euclidean(data_slice, i, j, dim);
-            unsafe {
-                *dist_sq.get_unchecked_mut(off_i + j) = d_sq;
-                *dist_sq.get_unchecked_mut(j * n + i) = d_sq;
-            }
-            if heap_k > 0 {
-                push_knn_heap(&mut heaps[i], d_sq, j, heap_k);
-                push_knn_heap(&mut heaps[j], d_sq, i, heap_k);
-            }
-        }
-    }
-
-    // Extract core distances.
-    let mut core_dists_sq = vec![0.0f64; n];
-    let mut nn_indices = vec![0usize; n];
-    for i in 0..n {
-        core_dists_sq[i] = if heaps[i].is_empty() { 0.0 } else { heaps[i][0].0 };
-        // Find nearest non-self neighbor (minimum distance in heap)
-        let mut min_d = f64::INFINITY;
-        for &(d, idx) in &heaps[i] {
-            if d < min_d {
-                min_d = d;
-                nn_indices[i] = idx;
-            }
-        }
-    }
+    // Phase 1: Compute pairwise squared distances and extract core distances.
+    // For dim >= 16, GEMM (X@X.T) is faster than point-by-point SIMD due to
+    // cache-blocked matrix multiply. For lower dims, SIMD is faster.
+    let (gram_matrix, norms_sq, core_dists_sq) = if dim >= 16 {
+        fused_phase1_gemm(data, n, k)
+    } else {
+        fused_phase1_simd(data, n, dim, k)
+    };
 
     let core_distances = ndarray::Array1::from_iter(core_dists_sq.iter().map(|&d| d.sqrt()));
 
-    // Phase 2: Prim's MST using cached squared distances.
-    // MR²(i,j) = max(core_i², core_j², dist²(i,j))
+    // Phase 2: Prim's MST using cached distances.
+    let edges = fused_prim_cached(&gram_matrix, &norms_sq, &core_dists_sq, n);
+
+    (core_distances, edges)
+}
+
+/// Phase 1 using GEMM: compute Gram matrix X@X.T and derive distances.
+/// dist²(i,j) = ||x_i||² + ||x_j||² - 2*(x_i · x_j)
+fn fused_phase1_gemm(
+    data: &ArrayView2<f64>,
+    n: usize,
+    k: usize,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    // Compute Gram matrix (all dot products) via cache-blocked matmul.
+    // into_raw_vec() avoids a 200MB copy by consuming the Array2.
+    let data_owned = data.to_owned();
+    let gram = data_owned.dot(&data_owned.t());
+    let gram_slice = gram.as_slice().unwrap();
+
+    // Extract squared norms from diagonal
+    let norms_sq: Vec<f64> = (0..n).map(|i| gram_slice[i * n + i]).collect();
+
+    // Extract core distances using kNN heaps
+    let heap_k = if k > 1 { k - 1 } else { 0 };
+    let mut heaps: Vec<crate::knn_heap::KnnHeap> =
+        (0..n).map(|_| crate::knn_heap::KnnHeap::new(heap_k)).collect();
+
+    if heap_k > 0 {
+        for i in 0..n {
+            let ni = norms_sq[i];
+            let row_off = i * n;
+            for j in (i + 1)..n {
+                let d_sq = (ni + norms_sq[j] - 2.0 * gram_slice[row_off + j]).max(0.0);
+                heaps[i].push(d_sq, j);
+                heaps[j].push(d_sq, i);
+            }
+        }
+    }
+
+    let mut core_dists_sq = vec![0.0f64; n];
+    for i in 0..n {
+        core_dists_sq[i] = heaps[i].max_dist_sq();
+        if core_dists_sq[i] == f64::INFINITY {
+            core_dists_sq[i] = 0.0;
+        }
+    }
+
+    // Consume the Array2 to get its backing Vec without copying
+    let gram_vec = gram.into_raw_vec_and_offset().0;
+    (gram_vec, norms_sq, core_dists_sq)
+}
+
+/// Phase 1 using point-by-point SIMD distance computation.
+fn fused_phase1_simd(
+    data: &ArrayView2<f64>,
+    n: usize,
+    dim: usize,
+    k: usize,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let data_contiguous = data.as_standard_layout();
+    let data_slice = data_contiguous.as_slice().unwrap();
+
+    // Compute squared norms for Prim's phase
+    let norms_sq: Vec<f64> = (0..n).map(|i| {
+        let off = i * dim;
+        let mut s = 0.0;
+        for d in 0..dim {
+            let v = unsafe { *data_slice.get_unchecked(off + d) };
+            s += v * v;
+        }
+        s
+    }).collect();
+
+    // Build gram matrix (dot products) and kNN heaps simultaneously
+    let mut gram = vec![0.0f64; n * n];
+    let heap_k = if k > 1 { k - 1 } else { 0 };
+    let mut heaps: Vec<crate::knn_heap::KnnHeap> =
+        (0..n).map(|_| crate::knn_heap::KnnHeap::new(heap_k)).collect();
+
+    // Set diagonal (self dot products)
+    for i in 0..n {
+        gram[i * n + i] = norms_sq[i];
+    }
+
+    for i in 0..n {
+        let off_i = i * n;
+        let ni = norms_sq[i];
+        for j in (i + 1)..n {
+            let d_sq = squared_euclidean(data_slice, i, j, dim);
+            // dot(i,j) = (norms_sq[i] + norms_sq[j] - d_sq) / 2
+            let dot_ij = (ni + norms_sq[j] - d_sq) * 0.5;
+            unsafe {
+                *gram.get_unchecked_mut(off_i + j) = dot_ij;
+                *gram.get_unchecked_mut(j * n + i) = dot_ij;
+            }
+            if heap_k > 0 {
+                heaps[i].push(d_sq, j);
+                heaps[j].push(d_sq, i);
+            }
+        }
+    }
+
+    let mut core_dists_sq = vec![0.0f64; n];
+    for i in 0..n {
+        core_dists_sq[i] = heaps[i].max_dist_sq();
+        if core_dists_sq[i] == f64::INFINITY {
+            core_dists_sq[i] = 0.0;
+        }
+    }
+
+    (gram, norms_sq, core_dists_sq)
+}
+
+/// Prim's MST using cached Gram matrix for O(1) distance lookups.
+/// dist²(i,j) = norms_sq[i] + norms_sq[j] - 2*gram[i*n+j]
+fn fused_prim_cached(
+    gram: &[f64],
+    norms_sq: &[f64],
+    core_dists_sq: &[f64],
+    n: usize,
+) -> Vec<MstEdge> {
     let mut min_weight_sq = vec![f64::INFINITY; n];
     let mut nearest = vec![0usize; n];
     let mut edges = Vec::with_capacity(n - 1);
@@ -286,8 +374,9 @@ pub fn fused_core_and_prim(
 
     // Initialize from node 0
     let core_0_sq = core_dists_sq[0];
+    let n0 = norms_sq[0];
     for &j in &active {
-        let d_sq = unsafe { *dist_sq.get_unchecked(j) }; // row 0, col j
+        let d_sq = (n0 + norms_sq[j] - 2.0 * gram[j]).max(0.0);
         let mr_sq = f64::max(f64::max(core_0_sq, core_dists_sq[j]), d_sq);
         min_weight_sq[j] = mr_sq;
         nearest[j] = 0;
@@ -326,6 +415,7 @@ pub fn fused_core_and_prim(
 
         // Update from newly added node using cached distances
         let core_i_sq = core_dists_sq[min_idx];
+        let ni = norms_sq[min_idx];
         let row_offset = min_idx * n;
         for &j in &active {
             let mw_sq_j = unsafe { *min_weight_sq.get_unchecked(j) };
@@ -336,7 +426,8 @@ pub fn fused_core_and_prim(
             if cd_sq_j >= mw_sq_j {
                 continue;
             }
-            let d_sq = unsafe { *dist_sq.get_unchecked(row_offset + j) };
+            let d_sq = (ni + unsafe { *norms_sq.get_unchecked(j) }
+                - 2.0 * unsafe { *gram.get_unchecked(row_offset + j) }).max(0.0);
             if d_sq >= mw_sq_j {
                 continue;
             }
@@ -350,47 +441,7 @@ pub fn fused_core_and_prim(
         }
     }
 
-    (core_distances, edges)
-}
-
-/// Push a distance into a bounded max-heap of size k.
-#[inline(always)]
-fn push_knn_heap(heap: &mut Vec<(f64, usize)>, dist_sq: f64, idx: usize, k: usize) {
-    if heap.len() < k {
-        heap.push((dist_sq, idx));
-        if heap.len() == k {
-            // Build max-heap
-            for i in (0..k / 2).rev() {
-                sift_down_knn(heap, i);
-            }
-        }
-    } else if dist_sq < heap[0].0 {
-        heap[0] = (dist_sq, idx);
-        sift_down_knn(heap, 0);
-    }
-}
-
-/// Sift down for a max-heap of (f64, usize) pairs.
-#[inline(always)]
-fn sift_down_knn(heap: &mut [(f64, usize)], mut idx: usize) {
-    let len = heap.len();
-    loop {
-        let left = 2 * idx + 1;
-        let right = 2 * idx + 2;
-        let mut largest = idx;
-        if left < len && heap[left].0 > heap[largest].0 {
-            largest = left;
-        }
-        if right < len && heap[right].0 > heap[largest].0 {
-            largest = right;
-        }
-        if largest != idx {
-            heap.swap(idx, largest);
-            idx = largest;
-        } else {
-            break;
-        }
-    }
+    edges
 }
 
 /// Compute squared Euclidean distance between points i and j using raw slice access.
