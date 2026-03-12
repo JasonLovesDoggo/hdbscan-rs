@@ -108,6 +108,7 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
     // Per-point component cache (avoids repeated uf.find() during traversal)
     let mut point_component = vec![0usize; n];
 
+    let mut round = 0;
     while n_components > 1 {
         // Reset component bests
         for best in component_best.iter_mut() {
@@ -120,8 +121,11 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
             point_component[i] = uf.find(i);
         }
 
-        // Compute per-node component labels for O(1) same-component pruning
-        compute_node_components_cached(tree, 0, &point_component, &mut node_component);
+        // Compute per-node component labels for O(1) same-component pruning.
+        // Skip on first round: all points are in separate components so no pruning possible.
+        if round > 0 {
+            compute_node_components_cached(tree, 0, &point_component, &mut node_component);
+        }
 
         // Dual-tree traversal from root x root
         if !tree.nodes().is_empty() {
@@ -178,6 +182,7 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
         if !merged_any {
             break;
         }
+        round += 1;
     }
 
     edges
@@ -336,9 +341,10 @@ fn dual_tree_search<T: SpatialTree>(
             let comp_q = point_component[qi];
             let core_q = core_dists[qi];
             let core_q_sq = core_q * core_q;
+            let best_q_sq = component_best[comp_q].mr_dist_sq;
 
             // Core distance shortcut: can't beat current best (squared comparison)
-            if core_q_sq >= component_best[comp_q].mr_dist_sq {
+            if core_q_sq >= best_q_sq {
                 continue;
             }
 
@@ -351,6 +357,12 @@ fn dual_tree_search<T: SpatialTree>(
                 let core_r = core_dists[ri];
                 let core_max = f64::max(core_q, core_r);
                 let core_max_sq = core_max * core_max;
+
+                // If core_max² already exceeds both component bests, skip distance
+                let best_r_sq = component_best[comp_r].mr_dist_sq;
+                if core_max_sq >= best_q_sq && core_max_sq >= best_r_sq {
+                    continue;
+                }
 
                 let d_sq = tree.dist_sq(qi, ri);
                 // MR² = max(core_max², d²) when alpha == 1.0

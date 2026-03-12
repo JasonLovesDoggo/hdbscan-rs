@@ -65,8 +65,6 @@ impl Hdbscan {
         }
 
         // Step 1+2: Compute core distances and build MST.
-        // For Euclidean with dim > 16, the ball tree is shared between core distances
-        // and MST to avoid building it twice.
         let (core_distances, mst_edges) = self.compute_core_and_mst(data, min_samples);
 
         // Step 3: Build single-linkage tree

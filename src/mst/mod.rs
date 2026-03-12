@@ -23,7 +23,7 @@ const KDTREE_MAX_DIM: usize = 16;
 /// sklearn-like blob data (Gaussian clusters with overlapping tails).
 pub fn dual_tree_threshold(dim: usize) -> usize {
     if dim <= 4 {
-        1500
+        500
     } else if dim <= 16 {
         // kd-tree region: Boruvka + shared tree wins above this threshold
         4000
