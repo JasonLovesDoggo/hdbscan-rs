@@ -29,14 +29,7 @@ except ImportError:
     HAS_C_HDBSCAN = False
     print("WARNING: standalone hdbscan package not installed (pip install hdbscan)")
 
-# Try to import fast-hdbscan
-try:
-    from fast_hdbscan import HDBSCAN as FastHDBSCAN
-
-    HAS_FAST_HDBSCAN = True
-except ImportError:
-    HAS_FAST_HDBSCAN = False
-    print("WARNING: fast-hdbscan package not installed (pip install fast-hdbscan)")
+from fast_hdbscan import HDBSCAN as FastHDBSCAN
 
 # --- Benchmark configurations ---
 # Each entry: (n_samples, n_dims, n_centers, min_cluster_size, label)
@@ -96,8 +89,6 @@ def run_c_hdbscan(X, min_cluster_size):
 
 def run_fast_hdbscan(X, min_cluster_size):
     """Run fast-hdbscan."""
-    if not HAS_FAST_HDBSCAN:
-        return None, None, None
     times = []
     labels = None
     for _ in range(N_RUNS):
@@ -209,19 +200,10 @@ def main():
             c_time_str = "N/A"
             c_mem_str = "N/A"
 
-        speedup_fast = ""
-        fast_time_str = ""
-        fast_mem_str = ""
-
-        if HAS_FAST_HDBSCAN and fast_time is not None:
-            speedup_fast_val = fast_time / rs_time if rs_time > 0 else float("inf")
-            speedup_fast = f"{speedup_fast_val:.1f}x"
-            fast_time_str = f"{fast_time*1000:.1f}"
-            fast_mem_str = f"{fast_mem:.0f}MB"
-        else:
-            speedup_fast = "N/A"
-            fast_time_str = "N/A"
-            fast_mem_str = "N/A"
+        speedup_fast_val = fast_time / rs_time if rs_time > 0 else float("inf")
+        speedup_fast = f"{speedup_fast_val:.1f}x"
+        fast_time_str = f"{fast_time*1000:.1f}"
+        fast_mem_str = f"{fast_mem:.0f}MB"
 
         print(
             f"{label:>12} {sk_time*1000:>9.1f}ms {c_time_str:>10} {fast_time_str:>10} {rs_time*1000:>9.1f}ms "
