@@ -202,18 +202,28 @@ impl Hdbscan {
         let dim = data.ncols();
         let threshold = mst::dual_tree_threshold(dim);
 
-        if !matches!(self.params.metric, Metric::Euclidean) || n <= threshold {
-            // Non-Euclidean or small n: use auto_mst (Prim's)
-            let (core_distances, nn_indices) =
-                core_distance::compute_core_distances_with_nn(data, &self.params.metric, min_samples);
-            let mst_edges = mst::auto_mst(
-                data,
-                &core_distances.view(),
-                &self.params.metric,
-                self.params.alpha,
-                Some(&nn_indices),
-            );
-            (core_distances, mst_edges)
+        let use_prims = !matches!(self.params.metric, Metric::Euclidean) || n <= threshold;
+
+        if use_prims {
+            // Fused core+Prim's: compute pairwise distances once, cache in matrix.
+            // Only beneficial when matrix fits in L3 cache (~32MB) so Prim's lookups are fast.
+            // At dim > 16, per-distance cost is high enough to make the savings worthwhile.
+            let matrix_bytes = n * n * 8;
+            if matches!(self.params.metric, Metric::Euclidean) && self.params.alpha == 1.0
+                && dim > 16 && matrix_bytes <= 48_000_000 {
+                mst::prim::fused_core_and_prim(data, min_samples)
+            } else {
+                let (core_distances, nn_indices) =
+                    core_distance::compute_core_distances_with_nn(data, &self.params.metric, min_samples);
+                let mst_edges = mst::auto_mst(
+                    data,
+                    &core_distances.view(),
+                    &self.params.metric,
+                    self.params.alpha,
+                    Some(&nn_indices),
+                );
+                (core_distances, mst_edges)
+            }
         } else if dim <= 16 {
             // Share bounded kd-tree between core distances and Boruvka MST
             let tree = BoundedKdTree::build(data);

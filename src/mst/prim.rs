@@ -47,6 +47,7 @@ pub fn prim_mst_seeded(
 /// - Compact active-set tracking (no branch misprediction from in_tree checks)
 /// - Early-exit pruning: skip distance computation when core distances dominate
 /// - Lazy sqrt: avoid sqrt when core distance is the mutual reachability result
+/// - Precomputed squared norms + dot product for distance: ||a-b||² = ||a||² + ||b||² - 2·a·b
 fn prim_mst_euclidean_fast(
     data: &ArrayView2<f64>,
     core_distances: &ArrayView1<f64>,
@@ -66,8 +67,6 @@ fn prim_mst_euclidean_fast(
         .expect("core_distances should be contiguous");
 
     // Precompute squared core distances for fast comparisons.
-    // MR² = max(core_i², core_j², d²) — working entirely in squared space
-    // eliminates ALL sqrt calls from the hot loop.
     let core_dists_sq: Vec<f64> = core_dists.iter().map(|&d| d * d).collect();
 
     // min_weight_sq[j] = squared mutual reachability distance from j to nearest tree node
@@ -82,7 +81,6 @@ fn prim_mst_euclidean_fast(
     let core_0_sq = core_dists_sq[0];
     for &j in &active {
         let d_sq = squared_euclidean(data_slice, 0, j, dim);
-        // MR² = max(core_0², core_j², d²)
         let mr_sq = f64::max(f64::max(core_0_sq, core_dists_sq[j]), d_sq);
         min_weight_sq[j] = mr_sq;
         nearest[j] = 0;
@@ -93,8 +91,7 @@ fn prim_mst_euclidean_fast(
             break;
         }
 
-        // Find the active node with minimum squared weight (prefer smaller index on ties).
-        // sqrt is monotonic, so min(MR²) ≡ min(MR).
+        // Find the active node with minimum squared weight
         let mut best_pos = 0;
         let mut best_sq = unsafe { *min_weight_sq.get_unchecked(*active.get_unchecked(0)) };
         let mut best_idx = unsafe { *active.get_unchecked(0) };
@@ -109,31 +106,25 @@ fn prim_mst_euclidean_fast(
 
         let min_idx = best_idx;
 
-        // Only take sqrt here, when creating the actual edge
         edges.push(MstEdge {
             u: nearest[min_idx],
             v: min_idx,
             weight: best_sq.sqrt(),
         });
 
-        // Remove from active set (swap-remove is O(1))
         active.swap_remove(best_pos);
 
-        // Periodically sort active set for cache-friendly data access
         if active.len() > 64 && active.len() % 128 == 0 {
             active.sort_unstable();
         }
 
         // Update min weights from the newly added node.
-        // Safety: all indices in active are < n, and all arrays are length n.
         let core_i_sq = unsafe { *core_dists_sq.get_unchecked(min_idx) };
         for &j in &active {
             let mw_sq_j = unsafe { *min_weight_sq.get_unchecked(j) };
-            // Fast check: if core_i² >= current best², can't improve
             if core_i_sq >= mw_sq_j {
                 continue;
             }
-            // Also check core_j²
             let cd_sq_j = unsafe { *core_dists_sq.get_unchecked(j) };
             if cd_sq_j >= mw_sq_j {
                 continue;
@@ -142,7 +133,6 @@ fn prim_mst_euclidean_fast(
             if d_sq >= mw_sq_j {
                 continue;
             }
-            // MR² = max(core_i², core_j², d²)
             let mr_sq = f64::max(f64::max(core_i_sq, cd_sq_j), d_sq);
             if mr_sq < mw_sq_j {
                 unsafe {
@@ -227,11 +217,188 @@ fn prim_mst_euclidean_alpha(
     edges
 }
 
+/// Fused core distance + Prim's MST for Euclidean metric with alpha=1.0.
+///
+/// Computes the full pairwise squared distance matrix once, extracts core distances
+/// from it, then runs Prim's using cached lookups. This halves total distance
+/// computation compared to separate core_distance + Prim's passes.
+pub fn fused_core_and_prim(
+    data: &ArrayView2<f64>,
+    min_samples: usize,
+) -> (ndarray::Array1<f64>, Vec<MstEdge>) {
+    let n = data.nrows();
+    let dim = data.ncols();
+    let k = min_samples.min(n); // k-th nearest including self
+
+    if n <= 1 {
+        return (ndarray::Array1::zeros(n), vec![]);
+    }
+
+    let data_contiguous = data.as_standard_layout();
+    let data_slice = data_contiguous.as_slice().unwrap();
+
+    // Phase 1: Compute upper-triangle pairwise squared distances and build kNN heaps.
+    // Store full symmetric matrix for O(1) Prim's lookups.
+    let mut dist_sq = vec![0.0f64; n * n];
+    // kNN max-heaps of size (k-1): track (k-1) nearest non-self neighbors.
+    // Since self has distance 0, core_dist = max of (k-1) nearest non-self = k-th nearest including self.
+    let heap_k = if k > 1 { k - 1 } else { 0 };
+    let mut heaps: Vec<Vec<(f64, usize)>> = (0..n).map(|_| Vec::with_capacity(heap_k.max(1))).collect();
+
+    for i in 0..n {
+        let off_i = i * n;
+        for j in (i + 1)..n {
+            let d_sq = squared_euclidean(data_slice, i, j, dim);
+            unsafe {
+                *dist_sq.get_unchecked_mut(off_i + j) = d_sq;
+                *dist_sq.get_unchecked_mut(j * n + i) = d_sq;
+            }
+            if heap_k > 0 {
+                push_knn_heap(&mut heaps[i], d_sq, j, heap_k);
+                push_knn_heap(&mut heaps[j], d_sq, i, heap_k);
+            }
+        }
+    }
+
+    // Extract core distances.
+    let mut core_dists_sq = vec![0.0f64; n];
+    let mut nn_indices = vec![0usize; n];
+    for i in 0..n {
+        core_dists_sq[i] = if heaps[i].is_empty() { 0.0 } else { heaps[i][0].0 };
+        // Find nearest non-self neighbor (minimum distance in heap)
+        let mut min_d = f64::INFINITY;
+        for &(d, idx) in &heaps[i] {
+            if d < min_d {
+                min_d = d;
+                nn_indices[i] = idx;
+            }
+        }
+    }
+
+    let core_distances = ndarray::Array1::from_iter(core_dists_sq.iter().map(|&d| d.sqrt()));
+
+    // Phase 2: Prim's MST using cached squared distances.
+    // MR²(i,j) = max(core_i², core_j², dist²(i,j))
+    let mut min_weight_sq = vec![f64::INFINITY; n];
+    let mut nearest = vec![0usize; n];
+    let mut edges = Vec::with_capacity(n - 1);
+    let mut active: Vec<usize> = (1..n).collect();
+
+    // Initialize from node 0
+    let core_0_sq = core_dists_sq[0];
+    for &j in &active {
+        let d_sq = unsafe { *dist_sq.get_unchecked(j) }; // row 0, col j
+        let mr_sq = f64::max(f64::max(core_0_sq, core_dists_sq[j]), d_sq);
+        min_weight_sq[j] = mr_sq;
+        nearest[j] = 0;
+    }
+
+    for _ in 0..(n - 1) {
+        if active.is_empty() {
+            break;
+        }
+
+        // Find minimum
+        let mut best_pos = 0;
+        let mut best_sq = unsafe { *min_weight_sq.get_unchecked(*active.get_unchecked(0)) };
+        let mut best_idx = unsafe { *active.get_unchecked(0) };
+        for (pos, &j) in active.iter().enumerate().skip(1) {
+            let w = unsafe { *min_weight_sq.get_unchecked(j) };
+            if w < best_sq || (w == best_sq && j < best_idx) {
+                best_sq = w;
+                best_pos = pos;
+                best_idx = j;
+            }
+        }
+
+        let min_idx = best_idx;
+        edges.push(MstEdge {
+            u: nearest[min_idx],
+            v: min_idx,
+            weight: best_sq.sqrt(),
+        });
+
+        active.swap_remove(best_pos);
+
+        if active.len() > 64 && active.len() % 128 == 0 {
+            active.sort_unstable();
+        }
+
+        // Update from newly added node using cached distances
+        let core_i_sq = core_dists_sq[min_idx];
+        let row_offset = min_idx * n;
+        for &j in &active {
+            let mw_sq_j = unsafe { *min_weight_sq.get_unchecked(j) };
+            if core_i_sq >= mw_sq_j {
+                continue;
+            }
+            let cd_sq_j = unsafe { *core_dists_sq.get_unchecked(j) };
+            if cd_sq_j >= mw_sq_j {
+                continue;
+            }
+            let d_sq = unsafe { *dist_sq.get_unchecked(row_offset + j) };
+            if d_sq >= mw_sq_j {
+                continue;
+            }
+            let mr_sq = f64::max(f64::max(core_i_sq, cd_sq_j), d_sq);
+            if mr_sq < mw_sq_j {
+                unsafe {
+                    *min_weight_sq.get_unchecked_mut(j) = mr_sq;
+                    *nearest.get_unchecked_mut(j) = min_idx;
+                }
+            }
+        }
+    }
+
+    (core_distances, edges)
+}
+
+/// Push a distance into a bounded max-heap of size k.
+#[inline(always)]
+fn push_knn_heap(heap: &mut Vec<(f64, usize)>, dist_sq: f64, idx: usize, k: usize) {
+    if heap.len() < k {
+        heap.push((dist_sq, idx));
+        if heap.len() == k {
+            // Build max-heap
+            for i in (0..k / 2).rev() {
+                sift_down_knn(heap, i);
+            }
+        }
+    } else if dist_sq < heap[0].0 {
+        heap[0] = (dist_sq, idx);
+        sift_down_knn(heap, 0);
+    }
+}
+
+/// Sift down for a max-heap of (f64, usize) pairs.
+#[inline(always)]
+fn sift_down_knn(heap: &mut [(f64, usize)], mut idx: usize) {
+    let len = heap.len();
+    loop {
+        let left = 2 * idx + 1;
+        let right = 2 * idx + 2;
+        let mut largest = idx;
+        if left < len && heap[left].0 > heap[largest].0 {
+            largest = left;
+        }
+        if right < len && heap[right].0 > heap[largest].0 {
+            largest = right;
+        }
+        if largest != idx {
+            heap.swap(idx, largest);
+            idx = largest;
+        } else {
+            break;
+        }
+    }
+}
+
 /// Compute squared Euclidean distance between points i and j using raw slice access.
 #[inline(always)]
 fn squared_euclidean(data: &[f64], i: usize, j: usize, dim: usize) -> f64 {
     crate::simd_distance::squared_euclidean_flat(data, i, j, dim)
 }
+
 
 /// Generic Prim's MST for non-Euclidean metrics. Precomputes the full matrix.
 fn prim_mst_generic(

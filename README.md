@@ -41,14 +41,14 @@ Single-thread, best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Comp
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|
-| 1Kx2D | 9.5 ms | 12.3 ms | **2.0 ms** | 4.6x | 6.0x |
-| 5Kx2D | 123 ms | 77.3 ms | **12.5 ms** | 9.8x | 6.2x |
-| 10Kx2D | 453 ms | 182 ms | **27.0 ms** | 16.7x | 6.7x |
-| 50Kx2D | 12,872 ms | 1,041 ms | **174 ms** | 74.0x | 6.0x |
-| 5Kx10D | 256 ms | 136 ms | **109 ms** | 2.3x | 1.2x |
-| 5Kx50D | 925 ms | 381 ms | 486 ms | 1.9x | 0.8x |
-| 1Kx256D | 243 ms | 229 ms | **77 ms** | 3.2x | 3.0x |
-| 500x1536D | 417 ms | 443 ms | **152 ms** | 2.7x | 2.9x |
+| 1Kx2D | 9.0 ms | 14.1 ms | **2.1 ms** | 4.4x | 6.8x |
+| 5Kx2D | 125 ms | 80.9 ms | **12.5 ms** | 10.0x | 6.5x |
+| 10Kx2D | 463 ms | 179 ms | **27.2 ms** | 17.0x | 6.6x |
+| 50Kx2D | 12,947 ms | 1,068 ms | **180 ms** | 71.9x | 5.9x |
+| 5Kx10D | 251 ms | 137 ms | **110 ms** | 2.3x | 1.2x |
+| 5Kx50D | 943 ms | 393 ms | 483 ms | 2.0x | 0.8x |
+| 1Kx256D | 237 ms | 229 ms | **48 ms** | 5.0x | 4.8x |
+| 500x1536D | 414 ms | 445 ms | **61 ms** | 6.7x | 7.2x |
 
 Memory usage is **5-60x lower** than Python implementations (no interpreter/NumPy overhead).
 

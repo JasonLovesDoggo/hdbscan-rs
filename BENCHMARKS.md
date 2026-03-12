@@ -28,40 +28,42 @@ GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_compar
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 500x2D | 4.1 ms | 6.7 ms | **1.4 ms** | 2.9x | 4.9x | 1.00 |
-| 1Kx2D | 9.5 ms | 12.3 ms | **2.0 ms** | 4.6x | 6.0x | 1.00 |
-| 2Kx2D | 25.7 ms | 28.4 ms | **4.4 ms** | 5.9x | 6.5x | 1.00 |
-| 5Kx2D | 123 ms | 77.3 ms | **12.5 ms** | 9.8x | 6.2x | 1.00 |
-| 10Kx2D | 453 ms | 182 ms | **27.0 ms** | 16.7x | 6.7x | 1.00 |
-| 50Kx2D | 12,872 ms | 1,041 ms | **174 ms** | 74.0x | 6.0x | 1.00 |
+| 500x2D | 5.2 ms | 10.6 ms | **1.4 ms** | 3.7x | 7.4x | 1.00 |
+| 1Kx2D | 9.0 ms | 14.1 ms | **2.1 ms** | 4.4x | 6.8x | 1.00 |
+| 2Kx2D | 26.9 ms | 27.0 ms | **4.3 ms** | 6.2x | 6.2x | 1.00 |
+| 5Kx2D | 125 ms | 80.9 ms | **12.5 ms** | 10.0x | 6.5x | 1.00 |
+| 10Kx2D | 463 ms | 179 ms | **27.2 ms** | 17.0x | 6.6x | 1.00 |
+| 50Kx2D | 12,947 ms | 1,068 ms | **180 ms** | 71.9x | 5.9x | 1.00 |
 
 ### Medium-dimensional
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 5Kx10D | 256 ms | 136 ms | **109 ms** | 2.3x | 1.2x | 1.00 |
-| 5Kx50D | 925 ms | 381 ms | 486 ms | 1.9x | 0.8x | 1.00 |
+| 5Kx10D | 251 ms | 137 ms | **110 ms** | 2.3x | 1.2x | 1.00 |
+| 5Kx50D | 943 ms | 393 ms | 483 ms | 2.0x | 0.8x | 1.00 |
 
 ### High-dimensional (LLM embeddings)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 2Kx256D | 911 ms | 854 ms | **277 ms** | 3.3x | 3.1x | 1.00 |
-| 1Kx256D | 243 ms | 229 ms | **77 ms** | 3.2x | 3.0x | 1.00 |
-| 500x1536D | 417 ms | 443 ms | **152 ms** | 2.7x | 2.9x | 1.00 |
+| 2Kx256D | 923 ms | 851 ms | **196 ms** | 4.7x | 4.3x | 1.00 |
+| 1Kx256D | 237 ms | 229 ms | **48 ms** | 5.0x | 4.8x | 1.00 |
+| 500x1536D | 414 ms | 445 ms | **61 ms** | 6.7x | 7.2x | 1.00 |
 
 ### Peak memory (RSS)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs |
 |--------|--------:|----------:|-----------:|
-| 500x2D | 129 MB | 129 MB | **3 MB** |
-| 10Kx2D | 136 MB | 137 MB | **6 MB** |
-| 50Kx2D | 161 MB | 179 MB | **20 MB** |
-| 5Kx50D | 179 MB | 179 MB | **16 MB** |
-| 2Kx256D | 179 MB | 179 MB | **31 MB** |
-| 500x1536D | 179 MB | 179 MB | **41 MB** |
+| 500x2D | 129 MB | 129 MB | **2 MB** |
+| 10Kx2D | 137 MB | 138 MB | **6 MB** |
+| 50Kx2D | 161 MB | 178 MB | **21 MB** |
+| 5Kx50D | 178 MB | 178 MB | **16 MB** |
+| 2Kx256D | 178 MB | 178 MB | **54 MB** |
+| 500x1536D | 178 MB | 178 MB | **43 MB** |
 
 Python-based implementations carry ~128 MB baseline from the interpreter + NumPy + sklearn. Rust runs as a standalone binary with no runtime overhead.
+
+Note: the 2Kx256D and 500x1536D configs use a fused core+Prim's approach that caches the pairwise distance matrix in memory. This trades memory for speed (matrix size = n² × 8 bytes). The fused path is automatically selected when the matrix fits in L3 cache and dimensionality is high enough to justify the savings.
 
 ## MST algorithm selection
 
@@ -72,6 +74,7 @@ The crate picks the MST strategy automatically based on the metric, dataset size
 | Euclidean, dim <= 4, n > 500 | Dual-tree Boruvka (kd-tree) | O(n log^2 n) |
 | Euclidean, dim 5-16, n > 4,000 | Dual-tree Boruvka (kd-tree) | O(n log^2 n) |
 | Euclidean, dim > 16, n > threshold | Dual-tree Boruvka (ball tree) | O(n log^2 n) |
+| Euclidean, dim > 16, small n, matrix fits in cache | Fused core+Prim's (cached matrix) | O(n^2) |
 | Small n or non-Euclidean | Prim's | O(n^2) |
 
 Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-512, brute force SIMD for dim > 512, and precomputed/generic for non-Euclidean metrics.
@@ -84,6 +87,7 @@ Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-5
 - **Bounded KD-tree** with per-node bounding boxes for tight minimum-distance lower bounds
 - **Shared tree construction** -- single ball/kd-tree shared between core distances and MST when both use tree-based algorithms
 - **kNN-seeded Boruvka** -- nearest neighbor indices from core distance computation seed initial component bounds
+- **Fused core+Prim's** -- for high-dim small-n: compute pairwise distances once, extract core distances and run Prim's on the cached matrix
 - **Fully squared-distance Prim's** -- all comparisons in squared MR space, sqrt only at edge creation; precomputed core² for fast pruning
 - **Unsafe-indexed distance** -- bounds-check-free flat array access in hot distance loops
 - **Copy-derive structs** -- MstEdge, SingleLinkageMerge, CondensedTreeEdge are Copy for zero-overhead value semantics
