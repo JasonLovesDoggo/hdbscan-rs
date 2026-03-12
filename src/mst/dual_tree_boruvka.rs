@@ -31,7 +31,7 @@ struct ComponentBest {
 
 /// Build MST using dual-tree Boruvka algorithm.
 /// Generic over any SpatialTree implementation.
-pub fn dual_tree_boruvka_mst<T: SpatialTree>(
+pub fn dual_tree_boruvka_mst<T: SpatialTree + Sync>(
     tree: &T,
     core_distances: &ArrayView1<f64>,
     alpha: f64,
@@ -154,20 +154,62 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
             compute_node_components_cached(tree, 0, &point_component, &mut node_component);
         }
 
-        // Dual-tree traversal from root x root
+        // Dual-tree traversal: split query tree at root for parallel processing.
+        // Each thread gets its own component_best clone and processes a query subtree
+        // against the full reference tree. Results are merged after all threads join.
         if !tree.nodes().is_empty() {
-            dual_tree_search(
-                tree,
-                0,
-                0,
-                core_dists,
-                &core_dists_sq,
-                &node_min_core_sq,
-                &point_component,
-                &mut component_best,
-                &node_component,
-                alpha,
-            );
+            let nodes = tree.nodes();
+            let root = &nodes[0];
+            let n_threads = std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(1);
+
+            if n_threads <= 1 || n < 256 || root.is_leaf() {
+                // Single-threaded path
+                dual_tree_search(
+                    tree, 0, 0,
+                    core_dists, &core_dists_sq, &node_min_core_sq,
+                    &point_component, &mut component_best, &node_component, alpha,
+                );
+            } else {
+                // Collect query subtrees at depth 1-2 for parallelism
+                let mut query_roots = Vec::new();
+                collect_query_subtrees(tree, 0, 0, n_threads.min(8), &mut query_roots);
+
+                let cb_ref = &component_best;
+                let cd_ref: &[f64] = core_dists;
+                let cdsq_ref: &[f64] = &core_dists_sq;
+                let nmcsq_ref: &[f64] = &node_min_core_sq;
+                let pc_ref: &[usize] = &point_component;
+                let nc_ref: &[usize] = &node_component;
+
+                let thread_bests: Vec<Vec<ComponentBest>> = std::thread::scope(|s| {
+                    let handles: Vec<_> = query_roots
+                        .iter()
+                        .map(|&qnode| {
+                            let mut local_best = cb_ref.clone();
+                            s.spawn(move || {
+                                dual_tree_search(
+                                    tree, qnode, 0,
+                                    cd_ref, cdsq_ref, nmcsq_ref,
+                                    pc_ref, &mut local_best, nc_ref, alpha,
+                                );
+                                local_best
+                            })
+                        })
+                        .collect();
+                    handles.into_iter().map(|h| h.join().unwrap()).collect()
+                });
+
+                // Merge: for each component, take the best across all threads
+                for thread_best in &thread_bests {
+                    for i in 0..n {
+                        if thread_best[i].mr_dist_sq < component_best[i].mr_dist_sq {
+                            component_best[i] = thread_best[i];
+                        }
+                    }
+                }
+            }
         }
 
         // Collect and merge cheapest edges
@@ -500,6 +542,35 @@ fn dual_tree_search<T: SpatialTree>(
                 alpha,
             );
         }
+    }
+}
+
+/// Collect query subtree roots for parallel processing.
+/// Splits the query tree to `target_count` subtrees (approximately).
+fn collect_query_subtrees<T: SpatialTree>(
+    tree: &T,
+    node_idx: usize,
+    depth: usize,
+    target_count: usize,
+    result: &mut Vec<usize>,
+) {
+    let nodes = tree.nodes();
+    if node_idx >= nodes.len() {
+        return;
+    }
+    let node = &nodes[node_idx];
+    // Stop splitting when we have enough subtrees or hit a leaf
+    if result.len() + 1 >= target_count || node.is_leaf() || depth >= 4 {
+        result.push(node_idx);
+        return;
+    }
+    let left = node.left();
+    let right = node.right();
+    if left < nodes.len() {
+        collect_query_subtrees(tree, left, depth + 1, target_count, result);
+    }
+    if right < nodes.len() {
+        collect_query_subtrees(tree, right, depth + 1, target_count, result);
     }
 }
 
