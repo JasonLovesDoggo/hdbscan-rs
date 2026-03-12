@@ -5,7 +5,7 @@ Head-to-head comparison against the two major HDBSCAN implementations:
 - **sklearn** (`sklearn.cluster.HDBSCAN`) -- scikit-learn 1.6.1, Cython + NumPy
 - **C-hdbscan** (`hdbscan` package) -- scikit-learn-contrib, Cython + ball tree Boruvka
 
-All benchmarks are **single-threaded**, best-of-3 wall time. Data is `make_blobs` with 5 Gaussian centers, `min_cluster_size=10`, default parameters. Each run includes the full pipeline (core distances, MST, condensed tree, cluster selection, labels + probabilities + outlier scores).
+All benchmarks are best-of-3 wall time. Data is `make_blobs` with 5 Gaussian centers, `min_cluster_size=10`, default parameters. Each run includes the full pipeline (core distances, MST, condensed tree, cluster selection, labels + probabilities + outlier scores).
 
 ## Machine
 
@@ -28,38 +28,38 @@ GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_compar
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 500x2D | 5.3 ms | 7.6 ms | **1.5 ms** | 3.5x | 5.1x | 1.00 |
-| 1Kx2D | 9.0 ms | 12.5 ms | **1.8 ms** | 5.0x | 6.9x | 1.00 |
-| 2Kx2D | 25.5 ms | 29.7 ms | **4.0 ms** | 6.4x | 7.5x | 1.00 |
-| 5Kx2D | 124 ms | 78.3 ms | **11.6 ms** | 10.7x | 6.7x | 1.00 |
-| 10Kx2D | 450 ms | 182 ms | **23.8 ms** | 18.9x | 7.7x | 1.00 |
-| 50Kx2D | 12,944 ms | 1,075 ms | **167 ms** | 77.7x | 6.5x | 1.00 |
+| 500x2D | 4.1 ms | 6.2 ms | **1.3 ms** | 3.1x | 4.7x | 1.00 |
+| 1Kx2D | 8.9 ms | 12.7 ms | **2.6 ms** | 3.4x | 4.9x | 1.00 |
+| 2Kx2D | 24.6 ms | 27.3 ms | **4.8 ms** | 5.1x | 5.6x | 1.00 |
+| 5Kx2D | 128 ms | 80.2 ms | **10.6 ms** | 12.1x | 7.6x | 1.00 |
+| 10Kx2D | 455 ms | 189 ms | **18.4 ms** | 24.7x | 10.3x | 1.00 |
+| 50Kx2D | 12,812 ms | 1,024 ms | **124 ms** | 103x | 8.2x | 1.00 |
 
 ### Medium-dimensional
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 5Kx10D | 258 ms | 140 ms | **96 ms** | 2.7x | 1.5x | 1.00 |
-| 5Kx50D | 929 ms | 383 ms | **295 ms** | 3.2x | 1.3x | 1.00 |
+| 5Kx10D | 241 ms | 136 ms | **62 ms** | 3.9x | 2.2x | 1.00 |
+| 5Kx50D | 924 ms | 379 ms | **272 ms** | 3.4x | 1.4x | 1.00 |
 
 ### High-dimensional (LLM embeddings)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 2Kx256D | 913 ms | 860 ms | **80 ms** | 11.4x | 10.8x | 1.00 |
-| 1Kx256D | 236 ms | 229 ms | **21 ms** | 11.3x | 10.9x | 1.00 |
-| 500x1536D | 417 ms | 443 ms | **26 ms** | 16.1x | 17.1x | 1.00 |
+| 2Kx256D | 926 ms | 858 ms | **78 ms** | 11.9x | 11.0x | 1.00 |
+| 1Kx256D | 246 ms | 230 ms | **19 ms** | 12.6x | 11.8x | 1.00 |
+| 500x1536D | 424 ms | 444 ms | **28 ms** | 14.9x | 15.7x | 1.00 |
 
 ### Peak memory (RSS)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs |
 |--------|--------:|----------:|-----------:|
-| 500x2D | 129 MB | 129 MB | **3 MB** |
-| 10Kx2D | 137 MB | 138 MB | **6 MB** |
-| 50Kx2D | 161 MB | 179 MB | **20 MB** |
-| 5Kx50D | 179 MB | 179 MB | 207 MB |
-| 2Kx256D | 179 MB | 179 MB | 56 MB |
-| 500x1536D | 179 MB | 179 MB | 41 MB |
+| 500x2D | 128 MB | 129 MB | **3 MB** |
+| 10Kx2D | 136 MB | 137 MB | **7 MB** |
+| 50Kx2D | 161 MB | 178 MB | **26 MB** |
+| 5Kx50D | 178 MB | 178 MB | 207 MB |
+| 2Kx256D | 178 MB | 178 MB | 56 MB |
+| 500x1536D | 178 MB | 178 MB | 41 MB |
 
 Python-based implementations carry ~128 MB baseline from the interpreter + NumPy + sklearn. Rust runs as a standalone binary with no runtime overhead.
 
@@ -101,6 +101,8 @@ Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-5
 - **Closer-child-first traversal** -- tighter bounds earlier for better pruning on the second child
 - **Core distance shortcut** -- skip points whose core distance exceeds their component's best edge
 - **Vec-based post-processing** -- outlier scores, probabilities, and labels use indexed arrays instead of hash maps
+- **Parallel kNN core distances** -- kNN queries split across CPU cores via `std::thread::scope`, each thread with its own KnnHeap writing to disjoint output slices
+- **Parallel dual-tree Boruvka** -- query tree split into subtrees processed in parallel, per-thread component_best arrays merged after each round
 
 ## Reproducing
 

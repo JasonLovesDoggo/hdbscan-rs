@@ -37,18 +37,18 @@ let labels = hdbscan.fit_predict(&data.view()).unwrap();
 
 ## Performance
 
-Single-thread, best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Compared against sklearn HDBSCAN (Cython) and C-hdbscan (Cython + ball tree Boruvka). Data is `make_blobs`, `min_cluster_size=10`.
+Best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Compared against sklearn HDBSCAN (Cython) and C-hdbscan (Cython + ball tree Boruvka). Data is `make_blobs`, `min_cluster_size=10`.
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|
-| 1Kx2D | 9.0 ms | 12.5 ms | **1.8 ms** | 5.0x | 6.9x |
-| 5Kx2D | 124 ms | 78.3 ms | **11.6 ms** | 10.7x | 6.7x |
-| 10Kx2D | 450 ms | 182 ms | **23.8 ms** | 18.9x | 7.7x |
-| 50Kx2D | 12,944 ms | 1,075 ms | **167 ms** | 77.7x | 6.5x |
-| 5Kx10D | 258 ms | 140 ms | **96 ms** | 2.7x | 1.5x |
-| 5Kx50D | 929 ms | 383 ms | **295 ms** | 3.2x | 1.3x |
-| 1Kx256D | 236 ms | 229 ms | **21 ms** | 11.3x | 10.9x |
-| 500x1536D | 417 ms | 443 ms | **26 ms** | 16.1x | 17.1x |
+| 1Kx2D | 8.9 ms | 12.7 ms | **2.6 ms** | 3.4x | 4.9x |
+| 5Kx2D | 128 ms | 80.2 ms | **10.6 ms** | 12.1x | 7.6x |
+| 10Kx2D | 455 ms | 189 ms | **18.4 ms** | 24.7x | 10.3x |
+| 50Kx2D | 12,812 ms | 1,024 ms | **124 ms** | 103x | 8.2x |
+| 5Kx10D | 241 ms | 136 ms | **62 ms** | 3.9x | 2.2x |
+| 5Kx50D | 924 ms | 379 ms | **272 ms** | 3.4x | 1.4x |
+| 1Kx256D | 246 ms | 230 ms | **19 ms** | 12.6x | 11.8x |
+| 500x1536D | 424 ms | 444 ms | **28 ms** | 14.9x | 15.7x |
 
 Memory usage is **3-60x lower** than Python implementations (no interpreter/NumPy overhead), except for medium-dim fused GEMM path which trades memory for speed.
 

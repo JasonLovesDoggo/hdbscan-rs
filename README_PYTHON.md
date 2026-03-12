@@ -53,17 +53,17 @@ HDBSCAN(
 
 ## Performance
 
-Single-thread, best-of-3 wall time on a 4-core AMD EPYC. Data is `make_blobs` with 5 centers, `min_cluster_size=10`.
+Best-of-3 wall time on a 4-core AMD EPYC. Data is `make_blobs` with 5 centers, `min_cluster_size=10`. Numbers are from the native Rust core; the Python binding adds <5ms overhead for data conversion.
 
 | Config | sklearn HDBSCAN | hdbscan (C) | hdbscan-rs | vs sklearn | vs C |
 |--------|----------------:|------------:|-----------:|-----------:|-----:|
-| 1Kx2D | 9.6 ms | 13.2 ms | **5.3 ms** | 1.8x | 2.4x |
-| 5Kx2D | 171 ms | 133 ms | **25 ms** | 6.8x | 5.3x |
-| 10Kx2D | 469 ms | 179 ms | **52 ms** | 9.0x | 3.4x |
-| 50Kx2D | 13,099 ms | 1,092 ms | **302 ms** | 43.4x | 3.6x |
-| 5Kx10D | 264 ms | 144 ms | **146 ms** | 1.8x | ~1.0x |
-| 1Kx256D | 241 ms | 232 ms | **98 ms** | 2.5x | 2.4x |
-| 500x1536D | 421 ms | 448 ms | **175 ms** | 2.4x | 2.6x |
+| 1Kx2D | 8.9 ms | 12.7 ms | **2.6 ms** | 3.4x | 4.9x |
+| 5Kx2D | 128 ms | 80.2 ms | **10.6 ms** | 12.1x | 7.6x |
+| 10Kx2D | 455 ms | 189 ms | **18.4 ms** | 24.7x | 10.3x |
+| 50Kx2D | 12,812 ms | 1,024 ms | **124 ms** | 103x | 8.2x |
+| 5Kx10D | 241 ms | 136 ms | **62 ms** | 3.9x | 2.2x |
+| 1Kx256D | 246 ms | 230 ms | **19 ms** | 12.6x | 11.8x |
+| 500x1536D | 424 ms | 444 ms | **28 ms** | 14.9x | 15.7x |
 
 Memory usage is 5-60x lower than Python-based implementations.
 
