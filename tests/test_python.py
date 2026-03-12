@@ -128,6 +128,109 @@ def test_leaf_selection():
     print("  leaf_selection: OK")
 
 
+def test_float32_input():
+    data = np.array([
+        [0.0, 0.0], [0.1, 0.0], [0.0, 0.1], [0.1, 0.1], [0.05, 0.05],
+        [10.0, 10.0], [10.1, 10.0], [10.0, 10.1], [10.1, 10.1], [10.05, 10.05],
+    ], dtype=np.float32)
+    assert data.dtype == np.float32
+    h = HDBSCAN(min_cluster_size=3)
+    labels = h.fit_predict(data)
+    assert len(labels) == 10
+    assert labels[0] == labels[1] == labels[2] == labels[3] == labels[4]
+    assert labels[5] == labels[6] == labels[7] == labels[8] == labels[9]
+    assert labels[0] != labels[5]
+    print("  float32_input: OK")
+
+
+def test_sklearn_dropin():
+    try:
+        from sklearn.cluster import HDBSCAN as SklearnHDBSCAN
+        from sklearn.datasets import make_blobs
+        from sklearn.metrics import adjusted_rand_score
+    except ImportError:
+        print("  sklearn_dropin: SKIPPED (sklearn not installed)")
+        return
+
+    X, y_true = make_blobs(n_samples=300, centers=5, random_state=42)
+
+    sk = SklearnHDBSCAN(min_cluster_size=15)
+    sk_labels = sk.fit_predict(X)
+
+    rs = HDBSCAN(min_cluster_size=15)
+    rs_labels = rs.fit_predict(X)
+
+    ari = adjusted_rand_score(sk_labels, rs_labels)
+    assert ari > 0.95, f"ARI between sklearn and hdbscan_rs was {ari}, expected > 0.95"
+    print(f"  sklearn_dropin: OK (ARI={ari:.4f})")
+
+
+def test_standalone_hdbscan_dropin():
+    try:
+        import hdbscan as hdbscan_pkg
+        from sklearn.datasets import make_blobs
+        from sklearn.metrics import adjusted_rand_score
+    except ImportError:
+        print("  standalone_hdbscan_dropin: SKIPPED (hdbscan or sklearn not installed)")
+        return
+
+    X, y_true = make_blobs(n_samples=300, centers=5, random_state=42)
+
+    ref = hdbscan_pkg.HDBSCAN(min_cluster_size=15)
+    ref_labels = ref.fit_predict(X)
+
+    rs = HDBSCAN(min_cluster_size=15)
+    rs_labels = rs.fit_predict(X)
+
+    ari = adjusted_rand_score(ref_labels, rs_labels)
+    assert ari > 0.95, f"ARI between hdbscan and hdbscan_rs was {ari}, expected > 0.95"
+    print(f"  standalone_hdbscan_dropin: OK (ARI={ari:.4f})")
+
+
+def test_bertopic_compatible_interface():
+    h = HDBSCAN(min_cluster_size=5)
+
+    # BERTopic expects fit_predict as a callable method
+    assert callable(getattr(h, "fit_predict", None)), "Missing fit_predict method"
+
+    # Fit on some data so we can check post-fit attributes
+    data = np.array([
+        [0.0, 0.0], [0.1, 0.0], [0.0, 0.1], [0.1, 0.1], [0.05, 0.05],
+        [10.0, 10.0], [10.1, 10.0], [10.0, 10.1], [10.1, 10.1], [10.05, 10.05],
+    ])
+    h.fit_predict(data)
+
+    # BERTopic reads labels_ and probabilities_ after fitting
+    labels = h.labels_
+    assert labels is not None
+    assert len(labels) == 10
+
+    probs = h.probabilities_
+    assert probs is not None
+    assert len(probs) == 10
+    assert all(0.0 <= p <= 1.0 for p in probs)
+
+    print("  bertopic_compatible_interface: OK")
+
+
+def test_large_dataset():
+    rng = np.random.RandomState(42)
+    data = rng.randn(5000, 10)
+    # Plant some structure: shift 3 groups apart
+    data[:1500] += 20
+    data[1500:3000] -= 20
+
+    h = HDBSCAN(min_cluster_size=50)
+    labels = h.fit_predict(data)
+
+    assert len(labels) == 5000
+    n_clusters = len(set(l for l in labels if l >= 0))
+    assert n_clusters >= 2, f"Expected at least 2 clusters, got {n_clusters}"
+    n_noise = sum(1 for l in labels if l == -1)
+    assert n_noise < 5000, "All points classified as noise"
+    print(f"  large_dataset: OK ({n_clusters} clusters, {n_noise} noise)")
+
+
 if __name__ == "__main__":
     print("Running Python binding tests...")
     test_two_clusters()
@@ -140,4 +243,9 @@ if __name__ == "__main__":
     test_not_fitted_error()
     test_invalid_metric()
     test_leaf_selection()
+    test_float32_input()
+    test_sklearn_dropin()
+    test_standalone_hdbscan_dropin()
+    test_bertopic_compatible_interface()
+    test_large_dataset()
     print("All Python tests passed!")

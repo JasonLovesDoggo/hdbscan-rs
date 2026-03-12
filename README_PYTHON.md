@@ -8,7 +8,7 @@ High-performance HDBSCAN clustering for Python, powered by a Rust core. Drop-in 
 pip install hdbscan-rs
 ```
 
-Requires Python >= 3.12 and NumPy >= 1.20. Pre-built wheels available for Linux, macOS, and Windows.
+Requires Python >= 3.11 and NumPy >= 1.20. Pre-built wheels available for Linux, macOS, and Windows.
 
 ## Quick start
 
@@ -23,6 +23,38 @@ labels = clusterer.fit_predict(data)
 
 print(f"Found {labels.max() + 1} clusters, {(labels == -1).sum()} noise points")
 ```
+
+## Migrating from other HDBSCAN packages
+
+### From `hdbscan` (standalone)
+
+```diff
+- import hdbscan
+- clusterer = hdbscan.HDBSCAN(min_cluster_size=15, min_samples=2, metric='euclidean')
++ from hdbscan_rs import HDBSCAN
++ clusterer = HDBSCAN(min_cluster_size=15, min_samples=2, metric='euclidean')
+  labels = clusterer.fit_predict(data)
+```
+
+### From `sklearn.cluster.HDBSCAN`
+
+```diff
+- from sklearn.cluster import HDBSCAN
++ from hdbscan_rs import HDBSCAN
+  clusterer = HDBSCAN(min_cluster_size=15)
+  labels = clusterer.fit_predict(data)
+```
+
+### From BERTopic
+
+```python
+from hdbscan_rs import HDBSCAN
+from bertopic import BERTopic
+
+topic_model = BERTopic(hdbscan_model=HDBSCAN(min_cluster_size=15))
+```
+
+No other code changes needed. Labels, probabilities, and outlier scores are all compatible.
 
 ## API
 
@@ -66,20 +98,6 @@ Best-of-3 wall time on a 4-core AMD EPYC. Data is `make_blobs` with 5 centers, `
 | 500x1536D | 424 ms | 444 ms | **28 ms** | 14.9x | 15.7x |
 
 Memory usage is 5-60x lower than Python-based implementations.
-
-## Migrating from sklearn
-
-```python
-# Before
-from sklearn.cluster import HDBSCAN
-clusterer = HDBSCAN(min_cluster_size=15)
-
-# After
-from hdbscan_rs import HDBSCAN
-clusterer = HDBSCAN(min_cluster_size=15)
-```
-
-The API matches sklearn's interface. Input should be a 2D NumPy array of float64. Results are sklearn-compatible (ARI > 0.99 across the test suite).
 
 ## Precomputed distances
 

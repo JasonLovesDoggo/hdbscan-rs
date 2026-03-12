@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run side-by-side performance comparison: sklearn vs hdbscan (C) vs hdbscan-rs (Rust).
+"""Run side-by-side performance comparison: sklearn vs hdbscan (C) vs fast-hdbscan vs hdbscan-rs (Rust).
 
 Compares wall time, peak memory (RSS), and clustering quality (ARI).
 
@@ -28,6 +28,15 @@ try:
 except ImportError:
     HAS_C_HDBSCAN = False
     print("WARNING: standalone hdbscan package not installed (pip install hdbscan)")
+
+# Try to import fast-hdbscan
+try:
+    from fast_hdbscan import HDBSCAN as FastHDBSCAN
+
+    HAS_FAST_HDBSCAN = True
+except ImportError:
+    HAS_FAST_HDBSCAN = False
+    print("WARNING: fast-hdbscan package not installed (pip install fast-hdbscan)")
 
 # --- Benchmark configurations ---
 # Each entry: (n_samples, n_dims, n_centers, min_cluster_size, label)
@@ -78,6 +87,21 @@ def run_c_hdbscan(X, min_cluster_size):
     labels = None
     for _ in range(N_RUNS):
         clusterer = hdbscan_c.HDBSCAN(min_cluster_size=min_cluster_size)
+        t0 = time.perf_counter()
+        labels = clusterer.fit_predict(X)
+        times.append(time.perf_counter() - t0)
+    peak_mb = get_peak_rss_mb()
+    return min(times), labels, peak_mb
+
+
+def run_fast_hdbscan(X, min_cluster_size):
+    """Run fast-hdbscan."""
+    if not HAS_FAST_HDBSCAN:
+        return None, None, None
+    times = []
+    labels = None
+    for _ in range(N_RUNS):
+        clusterer = FastHDBSCAN(min_cluster_size=min_cluster_size)
         t0 = time.perf_counter()
         labels = clusterer.fit_predict(X)
         times.append(time.perf_counter() - t0)
@@ -137,12 +161,12 @@ def main():
 
     # Header
     print(
-        f"{'config':>12} {'sklearn':>10} {'C-hdb':>10} {'rust':>10} "
-        f"{'rs/sk':>7} {'rs/C':>7} {'ARI(sk)':>8} "
-        f"{'sk_mem':>8} {'C_mem':>8} {'rs_mem':>8} "
+        f"{'config':>12} {'sklearn':>10} {'C-hdb':>10} {'fast-hdb':>10} {'rust':>10} "
+        f"{'rs/sk':>7} {'rs/C':>7} {'rs/fast':>7} {'ARI(sk)':>8} "
+        f"{'sk_mem':>8} {'C_mem':>8} {'fast_mem':>8} {'rs_mem':>8} "
         f"{'clust':>5}"
     )
-    print("-" * 120)
+    print("-" * 145)
 
     for n, dims, centers, mcs, label in BENCHMARKS:
         np.random.seed(42)
@@ -160,10 +184,11 @@ def main():
 
         sk_time, sk_labels, sk_mem = run_sklearn(X, mcs)
         c_time, c_labels, c_mem = run_c_hdbscan(X, mcs)
+        fast_time, fast_labels, fast_mem = run_fast_hdbscan(X, mcs)
         rs_time, rs_labels, rs_mem = run_rust(data_path, mcs)
 
         if rs_time is None:
-            print(f"{label:>12} {sk_time*1000:>10.1f} {'':>10} {'FAILED':>10}")
+            print(f"{label:>12} {sk_time*1000:>10.1f} {'':>10} {'':>10} {'FAILED':>10}")
             continue
 
         rs_c_count = len(set(rs_labels) - {-1})
@@ -184,16 +209,30 @@ def main():
             c_time_str = "N/A"
             c_mem_str = "N/A"
 
+        speedup_fast = ""
+        fast_time_str = ""
+        fast_mem_str = ""
+
+        if HAS_FAST_HDBSCAN and fast_time is not None:
+            speedup_fast_val = fast_time / rs_time if rs_time > 0 else float("inf")
+            speedup_fast = f"{speedup_fast_val:.1f}x"
+            fast_time_str = f"{fast_time*1000:.1f}"
+            fast_mem_str = f"{fast_mem:.0f}MB"
+        else:
+            speedup_fast = "N/A"
+            fast_time_str = "N/A"
+            fast_mem_str = "N/A"
+
         print(
-            f"{label:>12} {sk_time*1000:>9.1f}ms {c_time_str:>10} {rs_time*1000:>9.1f}ms "
-            f"{speedup_sk:>6.1f}x {speedup_c:>7} {ari_sk:>8.4f} "
-            f"{sk_mem:>7.0f}MB {c_mem_str:>8} {rs_mem:>7.0f}MB "
+            f"{label:>12} {sk_time*1000:>9.1f}ms {c_time_str:>10} {fast_time_str:>10} {rs_time*1000:>9.1f}ms "
+            f"{speedup_sk:>6.1f}x {speedup_c:>7} {speedup_fast:>7} {ari_sk:>8.4f} "
+            f"{sk_mem:>7.0f}MB {c_mem_str:>8} {fast_mem_str:>8} {rs_mem:>7.0f}MB "
             f"{rs_c_count:>5}"
         )
 
     print()
     print(f"Runs per benchmark: {N_RUNS} (best of {N_RUNS} wall time reported)")
-    print(f"Memory: peak RSS. sklearn/C-hdb share Python process; Rust runs as subprocess.")
+    print(f"Memory: peak RSS. sklearn/C-hdb/fast-hdb share Python process; Rust runs as subprocess.")
 
 
 if __name__ == "__main__":
