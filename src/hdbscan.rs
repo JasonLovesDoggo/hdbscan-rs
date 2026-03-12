@@ -210,6 +210,7 @@ impl Hdbscan {
             // Only worthwhile at dim > 16 where per-distance cost justifies caching.
             if matches!(self.params.metric, Metric::Euclidean) && self.params.alpha == 1.0
                 && dim > 16 {
+                // High dim, small n: fused GEMM+Prim's (GEMM efficient, cached lookups)
                 mst::prim::fused_core_and_prim(data, min_samples)
             } else {
                 let (core_distances, nn_indices) =

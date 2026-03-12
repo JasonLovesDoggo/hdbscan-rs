@@ -30,6 +30,7 @@ pub fn compute_core_distances(
 
 /// Compute core distances and nearest non-self neighbor index for each point.
 /// The nearest neighbor indices can be used to seed MST algorithms with good initial bounds.
+/// Also returns all k-1 neighbor indices per point for richer seeding.
 pub fn compute_core_distances_with_nn(
     data: &ArrayView2<f64>,
     metric: &Metric,
@@ -65,7 +66,7 @@ pub fn compute_core_distances_with_nn(
 }
 
 /// Compute core distances and nearest neighbors using any tree implementing CoreDistQuery.
-fn compute_core_distances_tree<T: CoreDistQuery>(
+fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
     tree: &T,
     data: &ArrayView2<f64>,
     k: usize,
@@ -79,18 +80,68 @@ fn compute_core_distances_tree<T: CoreDistQuery>(
     let data_contiguous = data.as_standard_layout();
     let data_slice = data_contiguous.as_slice().unwrap();
 
-    // Reuse a single heap across all queries to avoid n allocations
-    let mut heap = crate::knn_heap::KnnHeap::new(k);
-    for i in 0..n {
-        heap.clear();
-        let query = &data_slice[i * dim..(i + 1) * dim];
-        tree.query_core_dist_reuse(query, k, i, &mut heap);
-        core_distances[i] = heap.max_dist_sq().sqrt();
-        nn_indices[i] = heap.nearest_non_self(i);
+    // Parallel kNN: split queries across threads for ~linear speedup.
+    // Each thread gets its own KnnHeap and writes to disjoint output slices.
+    let n_threads = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(1)
+        .min(n);
+
+    if n_threads <= 1 || n < 256 {
+        // Single-threaded for small n or single-core
+        let mut heap = crate::knn_heap::KnnHeap::new(k);
+        for i in 0..n {
+            heap.clear();
+            let query = &data_slice[i * dim..(i + 1) * dim];
+            tree.query_core_dist_reuse(query, k, i, &mut heap);
+            core_distances[i] = heap.max_dist_sq().sqrt();
+            nn_indices[i] = heap.nearest_non_self(i);
+        }
+    } else {
+        let cd_ptr = core_distances.as_slice_mut().unwrap().as_mut_ptr();
+        let nn_ptr = nn_indices.as_mut_ptr();
+        let chunk_size = (n + n_threads - 1) / n_threads;
+
+        // SAFETY: each thread writes to disjoint index ranges [start..end)
+        // and only reads shared tree + data_slice (immutable).
+        std::thread::scope(|s| {
+            for t in 0..n_threads {
+                let start = t * chunk_size;
+                let end = (start + chunk_size).min(n);
+                if start >= end {
+                    continue;
+                }
+                let cd_s = SendPtr(cd_ptr);
+                let nn_s = SendPtr(nn_ptr);
+
+                s.spawn(move || {
+                    let cd = cd_s;
+                    let nn = nn_s;
+                    let mut heap = crate::knn_heap::KnnHeap::new(k);
+                    for i in start..end {
+                        heap.clear();
+                        let query = &data_slice[i * dim..(i + 1) * dim];
+                        tree.query_core_dist_reuse(query, k, i, &mut heap);
+                        unsafe {
+                            *cd.0.add(i) = heap.max_dist_sq().sqrt();
+                            *nn.0.add(i) = heap.nearest_non_self(i);
+                        }
+                    }
+                });
+            }
+        });
     }
 
     (core_distances, nn_indices)
 }
+
+/// Wrapper to send raw pointers across thread boundaries.
+/// SAFETY: caller must ensure disjoint access patterns.
+#[derive(Clone, Copy)]
+pub struct SendPtr<T>(pub *mut T);
+unsafe impl<T> Send for SendPtr<T> {}
+unsafe impl<T> Sync for SendPtr<T> {}
+
 
 /// Trait for tree structures that can answer core distance queries.
 pub trait CoreDistQuery {
@@ -122,6 +173,48 @@ impl CoreDistQuery for BallTree {
             self.knn_recursive_pub(0, query, heap, &mut sqrt_max_dist, root_centroid_dist_sq);
         }
     }
+}
+
+/// Upper-triangle brute-force Euclidean kNN using n simultaneous heaps.
+/// Computes each pairwise distance once (instead of twice) by processing
+/// both (i,j) and (j,i) in a single pass. Uses ~2x less total FLOPs.
+pub fn compute_core_distances_brute_upper_triangle(
+    data: &ArrayView2<f64>,
+    min_samples: usize,
+) -> (Array1<f64>, Vec<usize>) {
+    use crate::knn_heap::KnnHeap;
+
+    let n = data.nrows();
+    let dim = data.ncols();
+    let k = min_samples.min(n);
+    let heap_k = if k > 1 { k - 1 } else { 0 };
+
+    let data_contiguous = data.as_standard_layout();
+    let data_slice = data_contiguous.as_slice().unwrap();
+
+    let mut core_distances = Array1::zeros(n);
+    let mut nn_indices = vec![0usize; n];
+
+    if heap_k == 0 {
+        return (core_distances, nn_indices);
+    }
+
+    let mut heaps: Vec<KnnHeap> = (0..n).map(|_| KnnHeap::new(heap_k)).collect();
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d_sq = crate::simd_distance::squared_euclidean_flat(data_slice, i, j, dim);
+            heaps[i].push(d_sq, j);
+            heaps[j].push(d_sq, i);
+        }
+    }
+
+    for i in 0..n {
+        core_distances[i] = heaps[i].max_dist_sq().sqrt();
+        nn_indices[i] = heaps[i].nearest_non_self(i);
+    }
+
+    (core_distances, nn_indices)
 }
 
 /// Brute-force Euclidean kNN for high dimensions where tree pruning is inefficient.

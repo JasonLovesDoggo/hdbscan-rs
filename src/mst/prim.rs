@@ -3,6 +3,7 @@ use crate::params::Metric;
 use crate::types::MstEdge;
 use ndarray::{ArrayView1, ArrayView2};
 
+
 /// Build MST using Prim's algorithm on the mutual reachability graph.
 ///
 /// Mutual reachability distance: d_mreach(a,b) = max(core(a), core(b), d(a,b)/alpha)
@@ -274,26 +275,89 @@ fn fused_phase1_gemm(
     let mut core_dists_sq = vec![0.0f64; n];
 
     if heap_k > 0 {
-        let mut heap = crate::knn_heap::KnnHeap::new(heap_k);
-        for i in 0..n {
-            heap.clear();
-            let ni = norms_sq[i];
-            let row_off = i * n;
-            for j in 0..n {
-                if i == j {
-                    continue;
+        let n_threads = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(1)
+            .min(n);
+
+        if n_threads <= 1 || n < 256 {
+            let mut heap = crate::knn_heap::KnnHeap::new(heap_k);
+            for i in 0..n {
+                heap.clear();
+                let ni = norms_sq[i];
+                let row_off = i * n;
+                for j in 0..i {
+                    let d_sq = unsafe {
+                        (ni + *norms_sq.get_unchecked(j)
+                            - 2.0 * *gram_slice.get_unchecked(row_off + j))
+                        .max(0.0)
+                    };
+                    heap.push(d_sq, j);
                 }
-                let d_sq = unsafe {
-                    (ni + *norms_sq.get_unchecked(j)
-                        - 2.0 * *gram_slice.get_unchecked(row_off + j))
-                    .max(0.0)
-                };
-                heap.push(d_sq, j);
+                for j in (i + 1)..n {
+                    let d_sq = unsafe {
+                        (ni + *norms_sq.get_unchecked(j)
+                            - 2.0 * *gram_slice.get_unchecked(row_off + j))
+                        .max(0.0)
+                    };
+                    heap.push(d_sq, j);
+                }
+                core_dists_sq[i] = heap.max_dist_sq();
+                if core_dists_sq[i] == f64::INFINITY {
+                    core_dists_sq[i] = 0.0;
+                }
             }
-            core_dists_sq[i] = heap.max_dist_sq();
-            if core_dists_sq[i] == f64::INFINITY {
-                core_dists_sq[i] = 0.0;
+        } else {
+            let chunk_size = (n + n_threads - 1) / n_threads;
+            let norms_ref: &[f64] = &norms_sq;
+            let gram_ref: &[f64] = gram_slice;
+
+            // Split output into per-thread mutable slices (no raw pointers needed)
+            let mut chunks: Vec<(usize, &mut [f64])> = Vec::new();
+            let mut remaining = core_dists_sq.as_mut_slice();
+            for t in 0..n_threads {
+                let start = t * chunk_size;
+                let end = (start + chunk_size).min(n);
+                if start >= n {
+                    break;
+                }
+                let take = end - start;
+                let (chunk, rest) = remaining.split_at_mut(take);
+                remaining = rest;
+                chunks.push((start, chunk));
             }
+
+            std::thread::scope(|s| {
+                for (start, chunk) in chunks {
+                    s.spawn(move || {
+                        let mut heap = crate::knn_heap::KnnHeap::new(heap_k);
+                        for (local_i, slot) in chunk.iter_mut().enumerate() {
+                            let i = start + local_i;
+                            heap.clear();
+                            let ni = norms_ref[i];
+                            let row_off = i * n;
+                            for j in 0..i {
+                                let d_sq = unsafe {
+                                    (ni + *norms_ref.get_unchecked(j)
+                                        - 2.0 * *gram_ref.get_unchecked(row_off + j))
+                                    .max(0.0)
+                                };
+                                heap.push(d_sq, j);
+                            }
+                            for j in (i + 1)..n {
+                                let d_sq = unsafe {
+                                    (ni + *norms_ref.get_unchecked(j)
+                                        - 2.0 * *gram_ref.get_unchecked(row_off + j))
+                                    .max(0.0)
+                                };
+                                heap.push(d_sq, j);
+                            }
+                            let val = heap.max_dist_sq();
+                            *slot = if val == f64::INFINITY { 0.0 } else { val };
+                        }
+                    });
+                }
+            });
         }
     }
 

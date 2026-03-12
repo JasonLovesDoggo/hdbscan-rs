@@ -1,10 +1,6 @@
 """Example: using hdbscan-rs from Python.
 
 Install:
-    pip install maturin numpy
-    maturin develop --release
-
-Or from PyPI (once published):
     pip install hdbscan-rs
 """
 
