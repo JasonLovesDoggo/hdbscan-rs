@@ -2,13 +2,7 @@ use ndarray::ArrayView1;
 
 #[inline]
 pub fn euclidean_distance(a: &ArrayView1<f64>, b: &ArrayView1<f64>) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| {
-            let d = x - y;
-            d * d
-        })
-        .sum::<f64>()
+    crate::simd_distance::squared_euclidean_simd(a.as_slice().unwrap(), b.as_slice().unwrap())
         .sqrt()
 }
 

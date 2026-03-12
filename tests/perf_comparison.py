@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Run side-by-side performance comparison: sklearn vs hdbscan (C) vs hdbscan-rs (Rust).
 
+Compares wall time, peak memory (RSS), and clustering quality (ARI).
+
 Usage: python3 tests/perf_comparison.py
 """
 
-import json
 import os
+import resource
 import subprocess
 import sys
 import time
@@ -21,16 +23,38 @@ warnings.filterwarnings("ignore")
 # Try to import the standalone C-based hdbscan library
 try:
     import hdbscan as hdbscan_c
+
     HAS_C_HDBSCAN = True
 except ImportError:
     HAS_C_HDBSCAN = False
     print("WARNING: standalone hdbscan package not installed (pip install hdbscan)")
 
-SIZES = [100, 200, 500, 1000, 2000, 5000, 10000, 50000]
-DIMS = 2
-N_CENTERS = 5
-MCS = 10
+# --- Benchmark configurations ---
+# Each entry: (n_samples, n_dims, n_centers, min_cluster_size, label)
+BENCHMARKS = [
+    # Low-dimensional (classic spatial clustering)
+    (500, 2, 5, 10, "500x2D"),
+    (1000, 2, 5, 10, "1Kx2D"),
+    (2000, 2, 5, 10, "2Kx2D"),
+    (5000, 2, 5, 10, "5Kx2D"),
+    (10000, 2, 5, 10, "10Kx2D"),
+    (50000, 2, 5, 10, "50Kx2D"),
+    # Medium-dimensional
+    (5000, 10, 5, 10, "5Kx10D"),
+    (5000, 50, 5, 10, "5Kx50D"),
+    # High-dimensional (LLM embeddings)
+    (2000, 256, 5, 10, "2Kx256D"),
+    (1000, 256, 5, 10, "1Kx256D"),
+    (500, 1536, 5, 10, "500x1536D"),
+]
+
 N_RUNS = 3
+
+
+def get_peak_rss_mb():
+    """Get current process peak RSS in MB (includes children)."""
+    ru = resource.getrusage(resource.RUSAGE_SELF)
+    return ru.ru_maxrss / 1024  # Linux reports in KB
 
 
 def run_sklearn(X, min_cluster_size):
@@ -42,13 +66,14 @@ def run_sklearn(X, min_cluster_size):
         hdb.fit(X)
         times.append(time.perf_counter() - t0)
         labels = hdb.labels_
-    return min(times), labels
+    peak_mb = get_peak_rss_mb()
+    return min(times), labels, peak_mb
 
 
 def run_c_hdbscan(X, min_cluster_size):
     """Run the standalone C-based hdbscan library."""
     if not HAS_C_HDBSCAN:
-        return None, None
+        return None, None, None
     times = []
     labels = None
     for _ in range(N_RUNS):
@@ -56,28 +81,40 @@ def run_c_hdbscan(X, min_cluster_size):
         t0 = time.perf_counter()
         labels = clusterer.fit_predict(X)
         times.append(time.perf_counter() - t0)
-    return min(times), labels
+    peak_mb = get_peak_rss_mb()
+    return min(times), labels, peak_mb
 
 
 def run_rust(data_path, min_cluster_size):
-    """Run the Rust benchmark binary."""
+    """Run the Rust benchmark binary and parse time + memory."""
+    bin_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "target",
+        "release",
+        "examples",
+        "bench_runner",
+    )
     result = subprocess.run(
-        [
-            os.path.join(os.path.dirname(__file__), "..", "target", "release", "examples", "bench_runner"),
-            data_path,
-            str(min_cluster_size),
-            str(N_RUNS),
-        ],
+        [bin_path, data_path, str(min_cluster_size), str(N_RUNS)],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        print(f"Rust binary failed: {result.stderr}")
-        return None, None
+        print(f"  Rust binary failed: {result.stderr.strip()}")
+        return None, None, None
     lines = result.stdout.strip().split("\n")
     elapsed = float(lines[0].split(":")[1])
-    labels = [int(x) for x in lines[1].split(":")[1].split(",")]
-    return elapsed / 1000.0, labels
+    peak_kb = 0
+    label_line = 1
+    for ln in lines:
+        if ln.startswith("peak_rss_kb:"):
+            peak_kb = int(ln.split(":")[1])
+        if ln.startswith("labels:"):
+            label_line = lines.index(ln)
+    labels = [int(x) for x in lines[label_line].split(":")[1].split(",")]
+    peak_mb = peak_kb / 1024.0
+    return elapsed / 1000.0, labels, peak_mb
 
 
 def main():
@@ -98,50 +135,65 @@ def main():
     tmp_dir = "/tmp/hdbscan_bench"
     os.makedirs(tmp_dir, exist_ok=True)
 
-    if HAS_C_HDBSCAN:
-        header = f"{'n':>6} {'sklearn(ms)':>12} {'C-hdbscan(ms)':>14} {'rust(ms)':>12} {'rs/sk':>8} {'rs/C':>8} {'ARI(sk)':>8} {'ARI(C)':>8} {'sk_c':>5} {'C_c':>5} {'rs_c':>5}"
-        sep = "-" * len(header)
-    else:
-        header = f"{'n':>6} {'sklearn(ms)':>12} {'rust(ms)':>12} {'speedup':>8} {'ARI':>6} {'sk_c':>5} {'rs_c':>5}"
-        sep = "-" * 65
+    # Header
+    print(
+        f"{'config':>12} {'sklearn':>10} {'C-hdb':>10} {'rust':>10} "
+        f"{'rs/sk':>7} {'rs/C':>7} {'ARI(sk)':>8} "
+        f"{'sk_mem':>8} {'C_mem':>8} {'rs_mem':>8} "
+        f"{'clust':>5}"
+    )
+    print("-" * 120)
 
-    print(header)
-    print(sep)
-
-    for n in SIZES:
+    for n, dims, centers, mcs, label in BENCHMARKS:
         np.random.seed(42)
-        X, _ = make_blobs(n_samples=n, centers=N_CENTERS, cluster_std=1.0, random_state=42)
+        X, _ = make_blobs(
+            n_samples=n,
+            n_features=dims,
+            centers=centers,
+            cluster_std=1.0,
+            random_state=42,
+        )
 
         # Save data for Rust
-        data_path = os.path.join(tmp_dir, f"data_{n}.csv")
+        data_path = os.path.join(tmp_dir, f"data_{label}.csv")
         np.savetxt(data_path, X, delimiter=",")
 
-        sk_time, sk_labels = run_sklearn(X, MCS)
-        c_time, c_labels = run_c_hdbscan(X, MCS)
-        rs_time, rs_labels = run_rust(data_path, MCS)
+        sk_time, sk_labels, sk_mem = run_sklearn(X, mcs)
+        c_time, c_labels, c_mem = run_c_hdbscan(X, mcs)
+        rs_time, rs_labels, rs_mem = run_rust(data_path, mcs)
 
-        if rs_time is not None:
-            sk_c_count = len(set(sk_labels) - {-1})
-            rs_c_count = len(set(rs_labels) - {-1})
-            ari_sk = adjusted_rand_score(sk_labels, rs_labels)
+        if rs_time is None:
+            print(f"{label:>12} {sk_time*1000:>10.1f} {'':>10} {'FAILED':>10}")
+            continue
 
-            if HAS_C_HDBSCAN and c_time is not None:
-                c_c_count = len(set(c_labels) - {-1})
-                ari_c = adjusted_rand_score(c_labels, rs_labels)
-                speedup_sk = sk_time / rs_time if rs_time > 0 else float("inf")
-                speedup_c = c_time / rs_time if rs_time > 0 else float("inf")
-                print(
-                    f"{n:>6} {sk_time*1000:>12.2f} {c_time*1000:>14.2f} {rs_time*1000:>12.2f} "
-                    f"{speedup_sk:>7.2f}x {speedup_c:>7.2f}x {ari_sk:>8.4f} {ari_c:>8.4f} "
-                    f"{sk_c_count:>5} {c_c_count:>5} {rs_c_count:>5}"
-                )
-            else:
-                speedup = sk_time / rs_time if rs_time > 0 else float("inf")
-                print(
-                    f"{n:>6} {sk_time*1000:>12.2f} {rs_time*1000:>12.2f} {speedup:>7.2f}x {ari_sk:>6.4f} {sk_c_count:>5} {rs_c_count:>5}"
-                )
+        rs_c_count = len(set(rs_labels) - {-1})
+        ari_sk = adjusted_rand_score(sk_labels, rs_labels)
+
+        speedup_sk = sk_time / rs_time if rs_time > 0 else float("inf")
+        speedup_c = ""
+        c_time_str = ""
+        c_mem_str = ""
+
+        if HAS_C_HDBSCAN and c_time is not None:
+            speedup_c_val = c_time / rs_time if rs_time > 0 else float("inf")
+            speedup_c = f"{speedup_c_val:.1f}x"
+            c_time_str = f"{c_time*1000:.1f}"
+            c_mem_str = f"{c_mem:.0f}MB"
         else:
-            print(f"{n:>6} {sk_time*1000:>12.2f} {'FAILED':>12}")
+            speedup_c = "N/A"
+            c_time_str = "N/A"
+            c_mem_str = "N/A"
+
+        print(
+            f"{label:>12} {sk_time*1000:>9.1f}ms {c_time_str:>10} {rs_time*1000:>9.1f}ms "
+            f"{speedup_sk:>6.1f}x {speedup_c:>7} {ari_sk:>8.4f} "
+            f"{sk_mem:>7.0f}MB {c_mem_str:>8} {rs_mem:>7.0f}MB "
+            f"{rs_c_count:>5}"
+        )
+
+    print()
+    print(f"Runs per benchmark: {N_RUNS} (best of {N_RUNS} wall time reported)")
+    print(f"Memory: peak RSS. sklearn/C-hdb share Python process; Rust runs as subprocess.")
 
 
 if __name__ == "__main__":
