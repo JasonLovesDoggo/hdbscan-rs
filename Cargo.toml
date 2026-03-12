@@ -35,13 +35,13 @@ harness = false
 
 [profile.release]
 lto = "fat"
+strip = true
+codegen-units = 1
 
 [profile.wasm-release]
 inherits = "release"
 opt-level = "s"
-strip = true
 panic = "abort"
-codegen-units = 1
 
 [features]
 default = []
