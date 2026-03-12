@@ -19,7 +19,7 @@ fn squared_euclidean_simple(a: &[f64], b: &[f64]) -> f64 {
     sum
 }
 
-/// 4-wide unrolled squared Euclidean distance -- best for high dimensions.
+/// 4-wide unrolled squared Euclidean distance -- best for medium dimensions.
 #[inline(always)]
 fn squared_euclidean_unrolled(a: &[f64], b: &[f64]) -> f64 {
     debug_assert_eq!(a.len(), b.len());

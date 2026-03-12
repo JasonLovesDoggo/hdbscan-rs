@@ -1,6 +1,6 @@
 use crate::types::CondensedTreeEdge;
 use crate::union_find::UnionFind;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Assign flat cluster labels from selected clusters and the condensed tree.
 ///
@@ -24,11 +24,6 @@ pub fn assign_labels(
     // Build a mapping from selected cluster IDs to sequential labels 0..k
     let mut sorted_selected: Vec<usize> = selected_clusters.iter().copied().collect();
     sorted_selected.sort_unstable();
-    let cluster_to_label: HashMap<usize, i32> = sorted_selected
-        .iter()
-        .enumerate()
-        .map(|(i, &c)| (c, i as i32))
-        .collect();
 
     let root_cluster = condensed_tree.iter().map(|e| e.parent).min().unwrap();
 
@@ -36,6 +31,12 @@ pub fn assign_labels(
     let max_parent = condensed_tree.iter().map(|e| e.parent).max().unwrap_or(0);
     let max_child = condensed_tree.iter().map(|e| e.child).max().unwrap_or(0);
     let uf_size = max_parent.max(max_child) + 1;
+
+    // Vec-based cluster-to-label mapping
+    let mut cluster_to_label = vec![-1i32; uf_size];
+    for (i, &c) in sorted_selected.iter().enumerate() {
+        cluster_to_label[c] = i as i32;
+    }
 
     let mut uf = UnionFind::new(uf_size);
 
@@ -46,11 +47,11 @@ pub fn assign_labels(
         }
     }
 
-    // Build point lambda lookup (each point appears exactly once as a child)
-    let mut point_lambda: HashMap<usize, f64> = HashMap::new();
+    // Build point lambda lookup
+    let mut point_lambda = vec![0.0f64; n_points];
     for edge in condensed_tree {
         if edge.child < n_points {
-            point_lambda.insert(edge.child, edge.lambda_val);
+            point_lambda[edge.child] = edge.lambda_val;
         }
     }
 
@@ -79,22 +80,19 @@ pub fn assign_labels(
     for point in 0..n_points {
         let cluster = uf.find(point);
         if cluster != root_cluster {
-            // Point is in a non-root selected cluster
-            if let Some(&label) = cluster_to_label.get(&cluster) {
+            let label = cluster_to_label[cluster];
+            if label >= 0 {
                 labels[point] = label;
             }
-            // else: noise (component root is not a selected cluster)
         } else if let Some(threshold) = single_cluster_threshold {
-            // Single cluster case: check if point's lambda meets threshold
-            let lambda = point_lambda.get(&point).copied().unwrap_or(0.0);
+            let lambda = point_lambda[point];
             if lambda >= threshold {
-                if let Some(&label) = cluster_to_label.get(&root_cluster) {
+                let label = cluster_to_label[root_cluster];
+                if label >= 0 {
                     labels[point] = label;
                 }
             }
-            // else: noise
         }
-        // else: point is in root component but root is not selected -> noise
     }
 
     labels

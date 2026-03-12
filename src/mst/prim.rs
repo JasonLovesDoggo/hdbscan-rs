@@ -65,10 +65,12 @@ fn prim_mst_euclidean_fast(
         .as_slice()
         .expect("core_distances should be contiguous");
 
-    // Precompute squared core distances for fast comparisons
+    // Precompute squared core distances for fast comparisons.
+    // MR² = max(core_i², core_j², d²) — working entirely in squared space
+    // eliminates ALL sqrt calls from the hot loop.
     let core_dists_sq: Vec<f64> = core_dists.iter().map(|&d| d * d).collect();
 
-    let mut min_weight = vec![f64::INFINITY; n];
+    // min_weight_sq[j] = squared mutual reachability distance from j to nearest tree node
     let mut min_weight_sq = vec![f64::INFINITY; n];
     let mut nearest = vec![0usize; n];
     let mut edges = Vec::with_capacity(n - 1);
@@ -77,22 +79,12 @@ fn prim_mst_euclidean_fast(
     let mut active: Vec<usize> = (1..n).collect();
 
     // Initialize from node 0
-    let core_0 = core_dists[0];
     let core_0_sq = core_dists_sq[0];
     for &j in &active {
         let d_sq = squared_euclidean(data_slice, 0, j, dim);
-        // MR = max(core_0, core_j, dist). Work in squared space where possible.
-        let core_max_sq = f64::max(core_0_sq, core_dists_sq[j]);
-        if d_sq <= core_max_sq {
-            // dist <= core_max, so MR = core_max
-            let mr = f64::max(core_0, core_dists[j]);
-            min_weight[j] = mr;
-            min_weight_sq[j] = core_max_sq;
-        } else {
-            let mr = d_sq.sqrt();
-            min_weight[j] = mr;
-            min_weight_sq[j] = d_sq;
-        }
+        // MR² = max(core_0², core_j², d²)
+        let mr_sq = f64::max(f64::max(core_0_sq, core_dists_sq[j]), d_sq);
+        min_weight_sq[j] = mr_sq;
         nearest[j] = 0;
     }
 
@@ -101,14 +93,15 @@ fn prim_mst_euclidean_fast(
             break;
         }
 
-        // Find the active node with minimum weight (prefer smaller index on ties)
+        // Find the active node with minimum squared weight (prefer smaller index on ties).
+        // sqrt is monotonic, so min(MR²) ≡ min(MR).
         let mut best_pos = 0;
-        let mut best_val = min_weight[active[0]];
-        let mut best_idx = active[0];
+        let mut best_sq = unsafe { *min_weight_sq.get_unchecked(*active.get_unchecked(0)) };
+        let mut best_idx = unsafe { *active.get_unchecked(0) };
         for (pos, &j) in active.iter().enumerate().skip(1) {
-            let w = min_weight[j];
-            if w < best_val || (w == best_val && j < best_idx) {
-                best_val = w;
+            let w = unsafe { *min_weight_sq.get_unchecked(j) };
+            if w < best_sq || (w == best_sq && j < best_idx) {
+                best_sq = w;
                 best_pos = pos;
                 best_idx = j;
             }
@@ -116,10 +109,11 @@ fn prim_mst_euclidean_fast(
 
         let min_idx = best_idx;
 
+        // Only take sqrt here, when creating the actual edge
         edges.push(MstEdge {
             u: nearest[min_idx],
             v: min_idx,
-            weight: best_val,
+            weight: best_sq.sqrt(),
         });
 
         // Remove from active set (swap-remove is O(1))
@@ -131,34 +125,31 @@ fn prim_mst_euclidean_fast(
         }
 
         // Update min weights from the newly added node.
-        let core_i = core_dists[min_idx];
-        let core_i_sq = core_dists_sq[min_idx];
+        // Safety: all indices in active are < n, and all arrays are length n.
+        let core_i_sq = unsafe { *core_dists_sq.get_unchecked(min_idx) };
         for &j in &active {
-            // Fast check: if core_i >= min_weight[j], this can't improve
-            // (since MR >= core_i for any edge from min_idx)
-            if core_i_sq >= min_weight_sq[j] {
+            let mw_sq_j = unsafe { *min_weight_sq.get_unchecked(j) };
+            // Fast check: if core_i² >= current best², can't improve
+            if core_i_sq >= mw_sq_j {
                 continue;
             }
-            // Also check core_j
-            if core_dists_sq[j] >= min_weight_sq[j] {
+            // Also check core_j²
+            let cd_sq_j = unsafe { *core_dists_sq.get_unchecked(j) };
+            if cd_sq_j >= mw_sq_j {
                 continue;
             }
             let d_sq = squared_euclidean(data_slice, min_idx, j, dim);
-            if d_sq >= min_weight_sq[j] {
+            if d_sq >= mw_sq_j {
                 continue;
             }
-            // MR = max(core_max, dist)
-            let core_max_sq = f64::max(core_i_sq, core_dists_sq[j]);
-            if d_sq <= core_max_sq {
-                let mr = f64::max(core_i, core_dists[j]);
-                min_weight[j] = mr;
-                min_weight_sq[j] = core_max_sq;
-            } else {
-                let mr = d_sq.sqrt();
-                min_weight[j] = mr;
-                min_weight_sq[j] = d_sq;
+            // MR² = max(core_i², core_j², d²)
+            let mr_sq = f64::max(f64::max(core_i_sq, cd_sq_j), d_sq);
+            if mr_sq < mw_sq_j {
+                unsafe {
+                    *min_weight_sq.get_unchecked_mut(j) = mr_sq;
+                    *nearest.get_unchecked_mut(j) = min_idx;
+                }
             }
-            nearest[j] = min_idx;
         }
     }
 

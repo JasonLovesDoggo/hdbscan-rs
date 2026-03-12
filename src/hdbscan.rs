@@ -198,16 +198,29 @@ impl Hdbscan {
         min_samples: usize,
     ) -> (ndarray::Array1<f64>, Vec<crate::types::MstEdge>) {
         use crate::ball_tree::BallTree;
+        use crate::kdtree_bounded::BoundedKdTree;
 
         let n = data.nrows();
         let dim = data.ncols();
         let threshold = mst::dual_tree_threshold(dim);
 
-        if matches!(self.params.metric, Metric::Euclidean) && n > threshold && dim > 16 {
-            // Share ball tree between core distances and Boruvka MST
-            let tree = BallTree::build(data);
+        if !matches!(self.params.metric, Metric::Euclidean) || n <= threshold {
+            // Non-Euclidean or small n: use auto_mst (Prim's)
             let (core_distances, nn_indices) =
-                core_distance::compute_core_distances_with_balltree(&tree, data, min_samples);
+                core_distance::compute_core_distances_with_nn(data, &self.params.metric, min_samples);
+            let mst_edges = mst::auto_mst(
+                data,
+                &core_distances.view(),
+                &self.params.metric,
+                self.params.alpha,
+                Some(&nn_indices),
+            );
+            (core_distances, mst_edges)
+        } else if dim <= 16 {
+            // Share bounded kd-tree between core distances and Boruvka MST
+            let tree = BoundedKdTree::build(data);
+            let (core_distances, nn_indices) =
+                core_distance::compute_core_distances_with_bounded_kdtree(&tree, data, min_samples);
             let mst_edges = mst::dual_tree_boruvka::dual_tree_boruvka_mst(
                 &tree,
                 &core_distances.view(),
@@ -216,12 +229,13 @@ impl Hdbscan {
             );
             (core_distances, mst_edges)
         } else {
+            // Share ball tree between core distances and Boruvka MST
+            let tree = BallTree::build(data);
             let (core_distances, nn_indices) =
-                core_distance::compute_core_distances_with_nn(data, &self.params.metric, min_samples);
-            let mst_edges = mst::auto_mst(
-                data,
+                core_distance::compute_core_distances_with_balltree(&tree, data, min_samples);
+            let mst_edges = mst::dual_tree_boruvka::dual_tree_boruvka_mst(
+                &tree,
                 &core_distances.view(),
-                &self.params.metric,
                 self.params.alpha,
                 Some(&nn_indices),
             );

@@ -1,5 +1,5 @@
 use crate::types::CondensedTreeEdge;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Compute membership probabilities for each point.
 ///
@@ -17,73 +17,61 @@ pub fn compute_probabilities(
         return vec![0.0; n_points];
     }
 
-    // Build mapping from sequential label to cluster ID
     let mut sorted_selected: Vec<usize> = selected_clusters.iter().copied().collect();
     sorted_selected.sort_unstable();
 
-    // Compute birth lambda and max lambda for each selected cluster
-    let mut birth_lambda: HashMap<usize, f64> = HashMap::new();
-    let mut max_lambda: HashMap<usize, f64> = HashMap::new();
+    let max_id = condensed_tree
+        .iter()
+        .map(|e| e.parent.max(e.child))
+        .max()
+        .unwrap_or(0);
+    let n_ids = max_id + 1;
 
-    // Birth lambda: the lambda at which this cluster was created (edge from parent to this cluster)
+    // Birth lambda and max lambda for each cluster, indexed by cluster ID
+    let mut birth_lambda = vec![f64::INFINITY; n_ids];
+    let mut max_lambda = vec![0.0f64; n_ids];
+    let mut cluster_parent = vec![usize::MAX; n_ids];
+
     for edge in condensed_tree {
-        if edge.child >= n_points && selected_clusters.contains(&edge.child) {
-            birth_lambda
-                .entry(edge.child)
-                .and_modify(|v| {
-                    if edge.lambda_val < *v {
-                        *v = edge.lambda_val;
-                    }
-                })
-                .or_insert(edge.lambda_val);
+        if edge.child >= n_points {
+            cluster_parent[edge.child] = edge.parent;
+            if selected_clusters.contains(&edge.child) && edge.lambda_val < birth_lambda[edge.child] {
+                birth_lambda[edge.child] = edge.lambda_val;
+            }
         }
     }
 
     // For root cluster, birth lambda is 0
     if let Some(&root) = sorted_selected.first() {
-        birth_lambda.entry(root).or_insert(0.0);
-    }
-
-    // Max lambda: the maximum lambda at which any point falls out of this cluster
-    // (or any descendant that's been absorbed into it)
-    // We track the max lambda of point edges whose parent is the cluster or an ancestor
-    // that maps to it.
-
-    // Build the "effective cluster" for each cluster node in the condensed tree
-    // (walk up to find the nearest selected ancestor)
-    let mut cluster_parent: HashMap<usize, usize> = HashMap::new();
-    for edge in condensed_tree {
-        if edge.child >= n_points {
-            cluster_parent.insert(edge.child, edge.parent);
+        if birth_lambda[root] == f64::INFINITY {
+            birth_lambda[root] = 0.0;
         }
     }
 
-    let mut effective_cluster: HashMap<usize, usize> = HashMap::new();
+    // Build effective cluster mapping (nearest selected ancestor)
+    let mut effective_cluster = vec![usize::MAX; n_ids];
     for &c in selected_clusters {
-        effective_cluster.insert(c, c);
+        effective_cluster[c] = c;
     }
-
-    // For non-selected clusters, walk up to find selected ancestor
-    let all_clusters: HashSet<usize> = condensed_tree
-        .iter()
-        .flat_map(|e| {
-            let mut v = vec![e.parent];
-            if e.child >= n_points {
-                v.push(e.child);
+    // Process in ascending order so parent mappings are resolved first (root has lowest ID)
+    for c in n_points..n_ids {
+        if effective_cluster[c] == usize::MAX {
+            let parent = cluster_parent[c];
+            if parent != usize::MAX && effective_cluster[parent] != usize::MAX {
+                effective_cluster[c] = effective_cluster[parent];
             }
-            v
-        })
-        .collect();
-
-    for &c in &all_clusters {
-        if !effective_cluster.contains_key(&c) {
+        }
+    }
+    // Second pass for deeper nesting
+    for c in n_points..n_ids {
+        if effective_cluster[c] == usize::MAX {
             let mut current = c;
-            while let Some(&parent) = cluster_parent.get(&current) {
-                if let Some(&ec) = effective_cluster.get(&parent) {
-                    effective_cluster.insert(c, ec);
+            while cluster_parent[current] != usize::MAX {
+                current = cluster_parent[current];
+                if effective_cluster[current] != usize::MAX {
+                    effective_cluster[c] = effective_cluster[current];
                     break;
                 }
-                current = parent;
             }
         }
     }
@@ -91,30 +79,20 @@ pub fn compute_probabilities(
     // Compute max lambda per selected cluster from point edges
     for edge in condensed_tree {
         if edge.child < n_points {
-            if let Some(&ec) = effective_cluster.get(&edge.parent) {
-                let current_max = max_lambda.entry(ec).or_insert(0.0_f64);
-                if edge.lambda_val.is_finite() && edge.lambda_val > *current_max {
-                    *current_max = edge.lambda_val;
-                }
+            let ec = effective_cluster[edge.parent];
+            if ec != usize::MAX && edge.lambda_val.is_finite() && edge.lambda_val > max_lambda[ec] {
+                max_lambda[ec] = edge.lambda_val;
             }
         }
     }
 
     // Find the lambda at which each point enters its cluster
-    let mut point_lambda: HashMap<usize, f64> = HashMap::new();
-    let mut point_cluster_id: HashMap<usize, usize> = HashMap::new();
+    let mut point_lambda = vec![f64::NEG_INFINITY; n_points];
     for edge in condensed_tree {
         if edge.child < n_points {
-            if let Some(&ec) = effective_cluster.get(&edge.parent) {
-                // Use the highest lambda entry for this point in this effective cluster
-                let current = point_lambda
-                    .get(&edge.child)
-                    .copied()
-                    .unwrap_or(f64::NEG_INFINITY);
-                if edge.lambda_val >= current {
-                    point_lambda.insert(edge.child, edge.lambda_val);
-                    point_cluster_id.insert(edge.child, ec);
-                }
+            let ec = effective_cluster[edge.parent];
+            if ec != usize::MAX && edge.lambda_val >= point_lambda[edge.child] {
+                point_lambda[edge.child] = edge.lambda_val;
             }
         }
     }
@@ -123,19 +101,18 @@ pub fn compute_probabilities(
 
     for point in 0..n_points {
         if labels[point] < 0 {
-            continue; // noise
+            continue;
         }
         let cluster = sorted_selected[labels[point] as usize];
-        let bl = *birth_lambda.get(&cluster).unwrap_or(&0.0);
-        let ml = *max_lambda.get(&cluster).unwrap_or(&0.0);
-        let pl = *point_lambda.get(&point).unwrap_or(&0.0);
+        let bl = birth_lambda[cluster];
+        let bl = if bl == f64::INFINITY { 0.0 } else { bl };
+        let ml = max_lambda[cluster];
+        let pl = point_lambda[point];
 
         let range = ml - bl;
         if range > 0.0 && range.is_finite() {
-            let prob = ((pl - bl) / range).clamp(0.0, 1.0);
-            probabilities[point] = prob;
+            probabilities[point] = ((pl - bl) / range).clamp(0.0, 1.0);
         } else {
-            // All points at same lambda or infinite
             probabilities[point] = 1.0;
         }
     }

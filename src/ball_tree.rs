@@ -101,8 +101,9 @@ impl BallTree {
             centroid[d] *= inv_count;
         }
 
-        // Compute radius (max distance from centroid to any point)
+        // Compute radius and farthest point from centroid in a single pass
         let mut radius_sq = 0.0f64;
+        let mut farthest_a = indices[start];
         for &idx in &indices[start..end] {
             let base = idx * dim;
             let mut dist_sq = 0.0f64;
@@ -112,6 +113,7 @@ impl BallTree {
             }
             if dist_sq > radius_sq {
                 radius_sq = dist_sq;
+                farthest_a = idx;
             }
         }
         let radius = radius_sq.sqrt();
@@ -133,26 +135,9 @@ impl BallTree {
             return node_idx;
         }
 
-        // Split: find the two points farthest apart to define the split direction.
-        // First find the point farthest from the centroid.
-        let mut farthest_a = indices[start];
-        let mut max_dist_sq = 0.0f64;
-        for &idx in &indices[start..end] {
-            let base = idx * dim;
-            let mut dist_sq = 0.0f64;
-            for d in 0..dim {
-                let diff = data[base + d] - centroid[d];
-                dist_sq += diff * diff;
-            }
-            if dist_sq > max_dist_sq {
-                max_dist_sq = dist_sq;
-                farthest_a = idx;
-            }
-        }
-
         // Then find the point farthest from farthest_a.
         let mut farthest_b = farthest_a;
-        max_dist_sq = 0.0;
+        let mut max_dist_sq = 0.0;
         let base_a = farthest_a * dim;
         for &idx in &indices[start..end] {
             let base = idx * dim;
@@ -256,6 +241,23 @@ impl BallTree {
         &self.sorted_indices[node.idx_start..node.idx_end]
     }
 
+    /// Find the k-th nearest distance and the nearest non-self neighbor.
+    /// More efficient than query_knn when only core distance + nn are needed.
+    #[inline]
+    pub fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
+        if self.nodes.is_empty() || k == 0 {
+            return (0.0, 0);
+        }
+        let mut heap = crate::knn_heap::KnnHeap::new(k);
+        let mut sqrt_max_dist = f64::INFINITY;
+        let root_centroid_dist_sq =
+            crate::simd_distance::squared_euclidean_simd(query, &self.nodes[0].centroid);
+        self.knn_recursive(0, query, &mut heap, &mut sqrt_max_dist, root_centroid_dist_sq);
+        let core_dist = heap.max_dist_sq().sqrt();
+        let nn = heap.nearest_non_self(self_idx);
+        (core_dist, nn)
+    }
+
     /// Find k nearest neighbors of query point. Returns (distance, index) sorted by distance.
     pub fn query_knn(&self, query: &[f64], k: usize) -> Vec<(f64, usize)> {
         if self.nodes.is_empty() || k == 0 {
@@ -291,10 +293,13 @@ impl BallTree {
 
         if node.is_leaf {
             let old_max = heap.max_dist_sq();
+            let dim = self.dim;
+            let data = &self.data;
             for &idx in &self.sorted_indices[node.idx_start..node.idx_end] {
+                let base = idx * dim;
                 let dist_sq = crate::simd_distance::squared_euclidean_simd(
                     query,
-                    &self.data[idx * self.dim..(idx + 1) * self.dim],
+                    unsafe { data.get_unchecked(base..base + dim) },
                 );
                 heap.push(dist_sq, idx);
             }

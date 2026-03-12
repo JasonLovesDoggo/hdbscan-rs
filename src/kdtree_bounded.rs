@@ -197,6 +197,19 @@ impl BoundedKdTree {
         &self.sorted_indices[node.idx_start..node.idx_end]
     }
 
+    /// Find the k-th nearest distance and the nearest non-self neighbor.
+    #[inline]
+    pub fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
+        if self.nodes.is_empty() || k == 0 {
+            return (0.0, 0);
+        }
+        let mut heap = crate::knn_heap::KnnHeap::new(k);
+        self.knn_recursive(0, query, &mut heap);
+        let core_dist = heap.max_dist_sq().sqrt();
+        let nn = heap.nearest_non_self(self_idx);
+        (core_dist, nn)
+    }
+
     /// Find k nearest neighbors of query point.
     /// Returns (distance, index) sorted by distance.
     pub fn query_knn(&self, query: &[f64], k: usize) -> Vec<(f64, usize)> {

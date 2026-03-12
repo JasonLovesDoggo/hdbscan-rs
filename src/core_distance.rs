@@ -6,8 +6,9 @@ use crate::params::Metric;
 use ndarray::{Array1, ArrayView2};
 use ordered_float::OrderedFloat;
 
-/// Max dimensionality for kd-tree kNN. Above this, ball tree kNN is used.
-const KDTREE_KNN_MAX_DIM: usize = 8;
+/// Max dimensionality for bounded kd-tree kNN. Above this, ball tree kNN is used.
+/// Bounded kd-tree with AABB pruning outperforms ball tree up to ~10D.
+const KDTREE_KNN_MAX_DIM: usize = 10;
 
 /// Max dimensionality for ball tree kNN. Above this, brute force is faster
 /// because tree pruning degrades due to curse of dimensionality.
@@ -41,7 +42,7 @@ pub fn compute_core_distances_with_nn(
     let dim = data.ncols();
     let (core_distances, nn_indices) = match metric {
         Metric::Euclidean if dim <= KDTREE_KNN_MAX_DIM => {
-            compute_core_distances_kdtree_with_nn(data, k)
+            compute_core_distances_bounded_kdtree_with_nn(data, k)
         }
         Metric::Euclidean if dim <= BALLTREE_KNN_MAX_DIM => {
             compute_core_distances_balltree_with_nn(data, k)
@@ -62,29 +63,22 @@ pub fn compute_core_distances_with_nn(
     (core_distances, nn_indices)
 }
 
-/// KD-tree accelerated core distance computation for Euclidean metric.
-/// O(n log n) instead of O(n²).
-fn compute_core_distances_kdtree_with_nn(
+/// Bounded KD-tree accelerated core distance computation for Euclidean metric.
+/// Uses AABB pruning for better kNN performance than basic KD-tree.
+fn compute_core_distances_bounded_kdtree_with_nn(
     data: &ArrayView2<f64>,
     k: usize,
 ) -> (Array1<f64>, Vec<usize>) {
     let n = data.nrows();
-    let tree = KdTree::build(data);
+    let tree = BoundedKdTree::build(data);
     let mut core_distances = Array1::zeros(n);
     let mut nn_indices = vec![0usize; n];
 
     for i in 0..n {
         let query = data.row(i);
-        let neighbors = tree.query_knn(query.as_slice().unwrap(), k);
-        if let Some(&(dist, _)) = neighbors.last() {
-            core_distances[i] = dist;
-        }
-        // Nearest non-self neighbor is the first with dist > 0, or index 1 if sorted
-        if let Some(&(_, idx)) = neighbors.iter().find(|&&(d, idx)| idx != i && d > 0.0) {
-            nn_indices[i] = idx;
-        } else if neighbors.len() > 1 {
-            nn_indices[i] = neighbors[1].1;
-        }
+        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
+        core_distances[i] = core_dist;
+        nn_indices[i] = nn;
     }
 
     (core_distances, nn_indices)
@@ -102,15 +96,9 @@ fn compute_core_distances_balltree_with_nn(
 
     for i in 0..n {
         let query = data.row(i);
-        let neighbors = tree.query_knn(query.as_slice().unwrap(), k);
-        if let Some(&(dist, _)) = neighbors.last() {
-            core_distances[i] = dist;
-        }
-        if let Some(&(_, idx)) = neighbors.iter().find(|&&(d, idx)| idx != i && d > 0.0) {
-            nn_indices[i] = idx;
-        } else if neighbors.len() > 1 {
-            nn_indices[i] = neighbors[1].1;
-        }
+        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
+        core_distances[i] = core_dist;
+        nn_indices[i] = nn;
     }
 
     (core_distances, nn_indices)
@@ -264,15 +252,9 @@ pub fn compute_core_distances_with_balltree(
 
     for i in 0..n {
         let query = data.row(i);
-        let neighbors = tree.query_knn(query.as_slice().unwrap(), k);
-        if let Some(&(dist, _)) = neighbors.last() {
-            core_distances[i] = dist;
-        }
-        if let Some(&(_, idx)) = neighbors.iter().find(|&&(d, idx)| idx != i && d > 0.0) {
-            nn_indices[i] = idx;
-        } else if neighbors.len() > 1 {
-            nn_indices[i] = neighbors[1].1;
-        }
+        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
+        core_distances[i] = core_dist;
+        nn_indices[i] = nn;
     }
 
     (core_distances, nn_indices)
@@ -291,15 +273,9 @@ pub fn compute_core_distances_with_bounded_kdtree(
 
     for i in 0..n {
         let query = data.row(i);
-        let neighbors = tree.query_knn(query.as_slice().unwrap(), k);
-        if let Some(&(dist, _)) = neighbors.last() {
-            core_distances[i] = dist;
-        }
-        if let Some(&(_, idx)) = neighbors.iter().find(|&&(d, idx)| idx != i && d > 0.0) {
-            nn_indices[i] = idx;
-        } else if neighbors.len() > 1 {
-            nn_indices[i] = neighbors[1].1;
-        }
+        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
+        core_distances[i] = core_dist;
+        nn_indices[i] = nn;
     }
 
     (core_distances, nn_indices)
@@ -344,7 +320,7 @@ mod tests {
             [5.1, 5.0],
             [5.0, 5.1],
         ];
-        let (cd_kd, _) = compute_core_distances_kdtree_with_nn(&data.view(), 3);
+        let (cd_kd, _) = compute_core_distances_bounded_kdtree_with_nn(&data.view(), 3);
         let (cd_brute, _) = compute_core_distances_brute_with_nn(&data.view(), &Metric::Euclidean, 3);
         for i in 0..6 {
             assert!(

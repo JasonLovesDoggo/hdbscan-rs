@@ -28,27 +28,27 @@ GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_compar
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 500x2D | 4.3 ms | 6.8 ms | **1.4 ms** | 3.1x | 4.9x | 1.00 |
-| 1Kx2D | 9.6 ms | 13.2 ms | **3.9 ms** | 2.5x | 3.4x | 1.00 |
-| 2Kx2D | 27.2 ms | 28.7 ms | **7.6 ms** | 3.6x | 3.8x | 1.00 |
-| 5Kx2D | 171 ms | 133 ms | **26 ms** | 6.6x | 5.1x | 1.00 |
-| 10Kx2D | 469 ms | 179 ms | **55 ms** | 8.5x | 3.3x | 1.00 |
-| 50Kx2D | 13,099 ms | 1,092 ms | **300 ms** | 43.7x | 3.6x | 1.00 |
+| 500x2D | 4.3 ms | 6.8 ms | **1.1 ms** | 3.9x | 6.2x | 1.00 |
+| 1Kx2D | 9.6 ms | 13.2 ms | **3.5 ms** | 2.7x | 3.8x | 1.00 |
+| 2Kx2D | 27.2 ms | 28.7 ms | **6.3 ms** | 4.3x | 4.6x | 1.00 |
+| 5Kx2D | 171 ms | 133 ms | **22 ms** | 7.8x | 6.0x | 1.00 |
+| 10Kx2D | 469 ms | 179 ms | **48 ms** | 9.8x | 3.7x | 1.00 |
+| 50Kx2D | 13,099 ms | 1,092 ms | **239 ms** | 54.8x | 4.6x | 1.00 |
 
 ### Medium-dimensional
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 5Kx10D | 264 ms | 144 ms | **143 ms** | 1.8x | 1.0x | 1.00 |
-| 5Kx50D | 941 ms | 405 ms | **400 ms** | 2.4x | 1.0x | 1.00 |
+| 5Kx10D | 264 ms | 144 ms | **134 ms** | 2.0x | 1.1x | 1.00 |
+| 5Kx50D | 941 ms | 405 ms | **379 ms** | 2.5x | 1.1x | 1.00 |
 
 ### High-dimensional (LLM embeddings)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 2Kx256D | 943 ms | 863 ms | **260 ms** | 3.6x | 3.3x | 1.00 |
-| 1Kx256D | 241 ms | 232 ms | **72 ms** | 3.3x | 3.2x | 1.00 |
-| 500x1536D | 421 ms | 448 ms | **150 ms** | 2.8x | 3.0x | 1.00 |
+| 2Kx256D | 943 ms | 863 ms | **245 ms** | 3.8x | 3.5x | 1.00 |
+| 1Kx256D | 241 ms | 232 ms | **66 ms** | 3.7x | 3.5x | 1.00 |
+| 500x1536D | 421 ms | 448 ms | **147 ms** | 2.9x | 3.0x | 1.00 |
 
 ### Peak memory (RSS)
 
@@ -73,21 +73,22 @@ The crate picks the MST strategy automatically based on the metric, dataset size
 | Euclidean, dim > 16, n > threshold | Dual-tree Boruvka (ball tree) | O(n log^2 n) |
 | Small n or non-Euclidean | Prim's | O(n^2) |
 
-Core distances use kd-tree kNN for dim <= 8, ball tree kNN for dim 9-512, brute force SIMD for dim > 512, and precomputed/generic for non-Euclidean metrics.
+Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-512, brute force SIMD for dim > 512, and precomputed/generic for non-Euclidean metrics.
 
 ## Key optimizations
 
 - **SIMD auto-vectorization** -- 4-wide unrolled accumulators for distance computation (adaptive: simple loop for dim < 8, unrolled for dim >= 8)
-- **Shared KnnHeap** -- deduplicated binary max-heap (O(log k) push) used by all tree-based kNN
+- **Shared KnnHeap** -- deduplicated binary max-heap (O(log k) push) used by all tree-based kNN, with fast `query_core_dist` path that avoids sort/sqrt overhead
 - **Ball tree kNN** -- sqrt-free pruning with cached `sqrt(max_dist)`, pre-computed child centroid distances passed to avoid redundant SIMD ops
 - **Bounded KD-tree** with per-node bounding boxes for tight minimum-distance lower bounds
-- **Shared tree construction** -- single ball/kd-tree shared between core distances and MST when beneficial
+- **Shared tree construction** -- single ball/kd-tree shared between core distances and MST when both use tree-based algorithms
 - **kNN-seeded Boruvka** -- nearest neighbor indices from core distance computation seed initial component bounds
-- **Squared-distance Prim's** -- precomputed core²/weight² for squared comparisons, avoiding sqrt in the inner loop
+- **Fully squared-distance Prim's** -- all comparisons in squared MR space, sqrt only at edge creation; precomputed core² for fast pruning
 - **Cache-friendly active set** -- periodic sorting of active node indices for sequential memory access
 - **Per-node component caching** -- bottom-up labeling for O(1) same-component subtree pruning
 - **Closer-child-first traversal** -- tighter bounds earlier for better pruning on the second child
 - **Core distance shortcut** -- skip points whose core distance exceeds their component's best edge
+- **Vec-based post-processing** -- outlier scores, probabilities, and labels use indexed arrays instead of hash maps
 
 ## Reproducing
 

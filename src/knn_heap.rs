@@ -44,6 +44,28 @@ impl KnnHeap {
         self.items.len()
     }
 
+    /// Return the index of the nearest neighbor that is not self_idx.
+    #[inline]
+    pub fn nearest_non_self(&self, self_idx: usize) -> usize {
+        let mut best_dist = f64::INFINITY;
+        let mut best_idx = 0;
+        for &(d, idx) in &self.items {
+            if idx != self_idx && d > 0.0 && d < best_dist {
+                best_dist = d;
+                best_idx = idx;
+            }
+        }
+        if best_dist == f64::INFINITY && self.items.len() > 1 {
+            // Fallback: return any non-self index
+            for &(_, idx) in &self.items {
+                if idx != self_idx {
+                    return idx;
+                }
+            }
+        }
+        best_idx
+    }
+
     /// Return items sorted by distance (squared), converting to actual distance.
     pub fn into_sorted_distances(mut self) -> Vec<(f64, usize)> {
         self.items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
