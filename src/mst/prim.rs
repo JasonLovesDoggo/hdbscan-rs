@@ -253,6 +253,7 @@ pub fn fused_core_and_prim(
 }
 
 /// Phase 1 using GEMM: compute Gram matrix X@X.T and derive distances.
+/// Uses matrixmultiply's cache-blocked matmul for high throughput.
 /// dist²(i,j) = ||x_i||² + ||x_j||² - 2*(x_i · x_j)
 fn fused_phase1_gemm(
     data: &ArrayView2<f64>,
@@ -260,9 +261,8 @@ fn fused_phase1_gemm(
     k: usize,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     // Compute Gram matrix (all dot products) via cache-blocked matmul.
-    // into_raw_vec() avoids a 200MB copy by consuming the Array2.
-    let data_owned = data.to_owned();
-    let gram = data_owned.dot(&data_owned.t());
+    // Use view directly to avoid an unnecessary data copy.
+    let gram = data.dot(&data.t());
     let gram_slice = gram.as_slice().unwrap();
 
     // Extract squared norms from diagonal
