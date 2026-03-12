@@ -65,6 +65,24 @@ Python-based implementations carry ~128 MB baseline from the interpreter + NumPy
 
 Note: the 5Kx50D, 2Kx256D, and 500x1536D configs use a fused GEMM+Prim's approach that caches the Gram matrix (X@X.T) in memory. This trades memory for speed by computing all pairwise dot products via cache-blocked matrix multiply, then deriving distances as needed. The fused path is automatically selected for Euclidean metric with dim > 16.
 
+### WebAssembly (Node.js v8)
+
+WASM build: `--profile wasm-release` (`opt-level = "s"`, `panic = "abort"`, `strip`, LTO) + `wasm-opt -Os`. Binary size: **462 KB**.
+
+Single-threaded (WASM has no `std::thread`), same machine.
+
+| Config | Native | WASM | Slowdown |
+|--------|-------:|-----:|---------:|
+| 5Kx10D | 92.8 ms | 207.6 ms | 2.2x |
+| 5Kx50D | 260.6 ms | 572.6 ms | 2.2x |
+| 50Kx2D | 122.2 ms | 212.3 ms | 1.7x |
+| 1Kx256D | 19.1 ms | 78.0 ms | 4.1x |
+| 10Kx10D | 192.7 ms | 765.1 ms | 4.0x |
+
+The 1.7–2.2x slowdown is from missing SIMD auto-vectorization. The 4x configs (10Kx10D, 1Kx256D) lose the multi-threaded kNN/Boruvka parallelism that native gets.
+
+Reproducible via `tests/bench_wasm_vs_native.sh`.
+
 ## MST algorithm selection
 
 The crate picks the MST strategy automatically based on the metric, dataset size, and dimensionality:
