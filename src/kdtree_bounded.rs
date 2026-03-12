@@ -33,8 +33,17 @@ pub struct BKdNode {
 
 pub const NO_CHILD: usize = usize::MAX;
 
-/// Leaf size threshold — nodes with <= this many points are leaves.
-pub const LEAF_SIZE: usize = 40;
+/// Compute optimal leaf size based on dimensionality.
+/// Smaller leaves give tighter bounding boxes in low dims;
+/// larger leaves reduce tree overhead in higher dims.
+#[inline]
+pub fn leaf_size(dim: usize) -> usize {
+    if dim <= 4 {
+        10
+    } else {
+        20
+    }
+}
 
 /// KD-tree with bounding boxes for dual-tree algorithms.
 /// Points are stored only in leaves; internal nodes contain split metadata.
@@ -58,7 +67,8 @@ impl BoundedKdTree {
         let flat_data: Vec<f64> = data_contiguous.as_slice().unwrap().to_vec();
 
         let mut sorted_indices: Vec<usize> = (0..n).collect();
-        let mut nodes = Vec::with_capacity(2 * n / LEAF_SIZE + 1);
+        let ls = leaf_size(dim);
+        let mut nodes = Vec::with_capacity(2 * n / ls + 1);
 
         if n > 0 {
             Self::build_recursive(&flat_data, &mut sorted_indices, 0, n, dim, &mut nodes);
@@ -104,7 +114,7 @@ impl BoundedKdTree {
         }
 
         // Leaf node: store all points
-        if count <= LEAF_SIZE {
+        if count <= leaf_size(dim) {
             let node_idx = nodes.len();
             nodes.push(BKdNode {
                 split_dim: 0,
@@ -171,14 +181,27 @@ impl BoundedKdTree {
     pub fn min_dist_sq_node_to_node(&self, node_a: usize, node_b: usize) -> f64 {
         let a = &self.nodes[node_a];
         let b = &self.nodes[node_b];
+        let a_min = a.bbox_min.as_slice();
+        let a_max = a.bbox_max.as_slice();
+        let b_min = b.bbox_min.as_slice();
+        let b_max = b.bbox_max.as_slice();
+        let dim = self.dim;
         let mut dist_sq = 0.0f64;
-        for d in 0..self.dim {
-            if a.bbox_min[d] > b.bbox_max[d] {
-                let diff = a.bbox_min[d] - b.bbox_max[d];
-                dist_sq += diff * diff;
-            } else if b.bbox_min[d] > a.bbox_max[d] {
-                let diff = b.bbox_min[d] - a.bbox_max[d];
-                dist_sq += diff * diff;
+        for d in 0..dim {
+            unsafe {
+                let a_lo = *a_min.get_unchecked(d);
+                let b_hi = *b_max.get_unchecked(d);
+                if a_lo > b_hi {
+                    let diff = a_lo - b_hi;
+                    dist_sq += diff * diff;
+                } else {
+                    let b_lo = *b_min.get_unchecked(d);
+                    let a_hi = *a_max.get_unchecked(d);
+                    if b_lo > a_hi {
+                        let diff = b_lo - a_hi;
+                        dist_sq += diff * diff;
+                    }
+                }
             }
         }
         dist_sq
@@ -223,16 +246,26 @@ impl BoundedKdTree {
 
     fn knn_recursive(&self, node_idx: usize, query: &[f64], heap: &mut crate::knn_heap::KnnHeap) {
         let node = &self.nodes[node_idx];
+        let dim = self.dim;
 
         // Pruning: min distance from query to bounding box
         let mut min_dist_sq = 0.0f64;
-        for d in 0..self.dim {
-            if query[d] < node.bbox_min[d] {
-                let diff = node.bbox_min[d] - query[d];
-                min_dist_sq += diff * diff;
-            } else if query[d] > node.bbox_max[d] {
-                let diff = query[d] - node.bbox_max[d];
-                min_dist_sq += diff * diff;
+        let bbox_min = node.bbox_min.as_slice();
+        let bbox_max = node.bbox_max.as_slice();
+        for d in 0..dim {
+            unsafe {
+                let q = *query.get_unchecked(d);
+                let lo = *bbox_min.get_unchecked(d);
+                if q < lo {
+                    let diff = lo - q;
+                    min_dist_sq += diff * diff;
+                } else {
+                    let hi = *bbox_max.get_unchecked(d);
+                    if q > hi {
+                        let diff = q - hi;
+                        min_dist_sq += diff * diff;
+                    }
+                }
             }
         }
         if heap.is_full() && min_dist_sq >= heap.max_dist_sq() {
@@ -240,11 +273,11 @@ impl BoundedKdTree {
         }
 
         if node.is_leaf {
+            let data = &self.data;
             for &idx in &self.sorted_indices[node.idx_start..node.idx_end] {
-                let dist_sq = crate::simd_distance::squared_euclidean_simd(
-                    query,
-                    &self.data[idx * self.dim..(idx + 1) * self.dim],
-                );
+                let off = idx * dim;
+                let point = unsafe { data.get_unchecked(off..off + dim) };
+                let dist_sq = crate::simd_distance::squared_euclidean_simd(query, point);
                 heap.push(dist_sq, idx);
             }
         } else {

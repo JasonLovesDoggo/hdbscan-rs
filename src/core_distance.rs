@@ -1,6 +1,5 @@
 use crate::ball_tree::BallTree;
 use crate::distance;
-use crate::kdtree::KdTree;
 use crate::kdtree_bounded::BoundedKdTree;
 use crate::params::Metric;
 use ndarray::{Array1, ArrayView2};
@@ -279,11 +278,6 @@ pub fn compute_core_distances_with_bounded_kdtree(
     }
 
     (core_distances, nn_indices)
-}
-
-/// Build a KD-tree from data (for reuse by MST).
-pub fn build_kdtree(data: &ArrayView2<f64>) -> KdTree {
-    KdTree::build(data)
 }
 
 #[cfg(test)]
