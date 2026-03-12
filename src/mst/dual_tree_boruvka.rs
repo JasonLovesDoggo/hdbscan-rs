@@ -365,14 +365,14 @@ fn dual_tree_search<T: SpatialTree>(
 
     // === Base case: both leaves ===
     if q_node.is_leaf() && r_node.is_leaf() {
-        let q_points = &sorted[q_node.idx_start()..q_node.idx_end()];
-        let r_points = &sorted[r_node.idx_start()..r_node.idx_end()];
-
-        // Cache data pointer and dim for tight inner loop (avoids repeated field access)
-        let data = tree.data();
         let dim = tree.dim();
 
-        for &qi in q_points {
+        // Use tree-ordered data for sequential memory access when available
+        let tree_ordered = tree.tree_data();
+        let orig_data = tree.data();
+
+        for pos_q in q_node.idx_start()..q_node.idx_end() {
+            let qi = sorted[pos_q];
             let comp_q = point_component[qi];
             let core_q_sq = core_dists_sq[qi];
             let mut best_q_sq = component_best[comp_q].mr_dist_sq;
@@ -382,7 +382,8 @@ fn dual_tree_search<T: SpatialTree>(
                 continue;
             }
 
-            for &ri in r_points {
+            for pos_r in r_node.idx_start()..r_node.idx_end() {
+                let ri = sorted[pos_r];
                 let comp_r = point_component[ri];
                 if comp_q == comp_r {
                     continue;
@@ -396,7 +397,12 @@ fn dual_tree_search<T: SpatialTree>(
                     continue;
                 }
 
-                let d_sq = crate::simd_distance::squared_euclidean_flat(data, qi, ri, dim);
+                // Use tree-ordered data for sequential access, fall back to original
+                let d_sq = if let Some(td) = tree_ordered {
+                    crate::simd_distance::squared_euclidean_flat(td, pos_q, pos_r, dim)
+                } else {
+                    crate::simd_distance::squared_euclidean_flat(orig_data, qi, ri, dim)
+                };
                 // MR² = max(core_max², d²) when alpha == 1.0
                 let mr_sq = if alpha == 1.0 {
                     f64::max(core_max_sq, d_sq)

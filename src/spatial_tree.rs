@@ -24,11 +24,18 @@ pub trait SpatialTree {
     /// Minimum possible squared distance between two nodes.
     fn min_dist_sq_node_to_node(&self, node_a: usize, node_b: usize) -> f64;
 
-    /// Squared Euclidean distance between two points.
+    /// Squared Euclidean distance between two points (by original index).
     fn dist_sq(&self, i: usize, j: usize) -> f64;
 
     /// Get point indices for a node's subtree.
     fn node_points(&self, node_idx: usize) -> &[usize];
+
+    /// Tree-ordered data for cache-friendly leaf access.
+    /// `tree_data[pos * dim .. (pos+1) * dim]` = data for sorted_indices[pos].
+    /// Returns None if not available (falls back to original data + sorted_indices).
+    fn tree_data(&self) -> Option<&[f64]> {
+        None
+    }
 }
 
 // --- BoundedKdTree impl ---
@@ -95,6 +102,10 @@ impl SpatialTree for crate::kdtree_bounded::BoundedKdTree {
     fn node_points(&self, node_idx: usize) -> &[usize] {
         self.node_points(node_idx)
     }
+    #[inline]
+    fn tree_data(&self) -> Option<&[f64]> {
+        Some(&self.tree_data)
+    }
 }
 
 // --- BallTree impl ---
@@ -160,5 +171,9 @@ impl SpatialTree for crate::ball_tree::BallTree {
     #[inline]
     fn node_points(&self, node_idx: usize) -> &[usize] {
         self.node_points(node_idx)
+    }
+    #[inline]
+    fn tree_data(&self) -> Option<&[f64]> {
+        Some(&self.tree_data)
     }
 }

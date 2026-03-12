@@ -57,8 +57,12 @@ pub struct BoundedKdTree {
     pub bbox_min: Vec<f64>,
     /// Contiguous bounding box maximums: `bbox_max[node * dim + d]`
     pub bbox_max: Vec<f64>,
-    /// The raw data, stored as a flat [n * dim] array for cache efficiency.
+    /// The raw data, stored as a flat [n * dim] array in ORIGINAL index order.
     pub data: Vec<f64>,
+    /// Data reordered to match sorted_indices (tree traversal order).
+    /// `tree_data[pos * dim .. (pos+1) * dim]` = data for sorted_indices[pos].
+    /// Enables sequential memory access when iterating leaf points.
+    pub tree_data: Vec<f64>,
     pub dim: usize,
     pub n: usize,
     /// Sorted point indices (each leaf's points are contiguous in this array)
@@ -94,11 +98,20 @@ impl BoundedKdTree {
             );
         }
 
+        // Build tree-ordered data for cache-friendly leaf access
+        let mut tree_data = vec![0.0f64; n * dim];
+        for (pos, &orig_idx) in sorted_indices.iter().enumerate() {
+            let src = orig_idx * dim;
+            let dst = pos * dim;
+            tree_data[dst..dst + dim].copy_from_slice(&flat_data[src..src + dim]);
+        }
+
         BoundedKdTree {
             nodes,
             bbox_min: bbox_min_buf,
             bbox_max: bbox_max_buf,
             data: flat_data,
+            tree_data,
             dim,
             n,
             sorted_indices,
@@ -293,11 +306,12 @@ impl BoundedKdTree {
         }
 
         if node.is_leaf {
-            let data = &self.data;
-            for &idx in &self.sorted_indices[node.idx_start..node.idx_end] {
-                let off = idx * dim;
-                let point = unsafe { data.get_unchecked(off..off + dim) };
+            let tree_data = &self.tree_data;
+            for pos in node.idx_start..node.idx_end {
+                let off = pos * dim;
+                let point = unsafe { tree_data.get_unchecked(off..off + dim) };
                 let dist_sq = crate::simd_distance::squared_euclidean_simd(query, point);
+                let idx = self.sorted_indices[pos];
                 heap.push(dist_sq, idx);
             }
         } else {

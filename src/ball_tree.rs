@@ -47,8 +47,11 @@ pub struct BallTree {
     pub nodes: Vec<BallNode>,
     /// Contiguous centroid storage: `centroids[node * dim + d]`
     pub centroids: Vec<f64>,
-    /// The raw data, stored as a flat [n * dim] array for cache efficiency.
+    /// The raw data, stored as a flat [n * dim] array in ORIGINAL index order.
     pub data: Vec<f64>,
+    /// Data reordered to match sorted_indices (tree traversal order).
+    /// Enables sequential memory access when iterating leaf points.
+    pub tree_data: Vec<f64>,
     pub dim: usize,
     pub n: usize,
     /// Sorted point indices (each leaf's points are contiguous in this array)
@@ -73,10 +76,19 @@ impl BallTree {
             Self::build_recursive(&flat_data, &mut sorted_indices, 0, n, dim, &mut nodes, &mut centroids_buf);
         }
 
+        // Build tree-ordered data for cache-friendly leaf access
+        let mut tree_data = vec![0.0f64; n * dim];
+        for (pos, &orig_idx) in sorted_indices.iter().enumerate() {
+            let src = orig_idx * dim;
+            let dst = pos * dim;
+            tree_data[dst..dst + dim].copy_from_slice(&flat_data[src..src + dim]);
+        }
+
         BallTree {
             nodes,
             centroids: centroids_buf,
             data: flat_data,
+            tree_data,
             dim,
             n,
             sorted_indices,
@@ -313,13 +325,14 @@ impl BallTree {
         if node.is_leaf {
             let old_max = heap.max_dist_sq();
             let dim = self.dim;
-            let data = &self.data;
-            for &idx in &self.sorted_indices[node.idx_start..node.idx_end] {
-                let base = idx * dim;
+            let tree_data = &self.tree_data;
+            for pos in node.idx_start..node.idx_end {
+                let base = pos * dim;
                 let dist_sq = crate::simd_distance::squared_euclidean_simd(
                     query,
-                    unsafe { data.get_unchecked(base..base + dim) },
+                    unsafe { tree_data.get_unchecked(base..base + dim) },
                 );
+                let idx = self.sorted_indices[pos];
                 heap.push(dist_sq, idx);
             }
             let new_max = heap.max_dist_sq();
