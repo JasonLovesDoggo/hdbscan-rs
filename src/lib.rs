@@ -45,6 +45,10 @@ pub mod simd_distance;
 pub mod spatial_tree;
 pub mod union_find;
 
+/// Test/benchmark utilities (not part of public API).
+#[doc(hidden)]
+pub mod bench_utils;
+
 #[cfg(feature = "python")]
 mod python;
 
