@@ -1,7 +1,8 @@
 //! Python bindings for hdbscan-rs via PyO3.
 
-use numpy::{PyArray1, PyReadonlyArray2};
-use pyo3::exceptions::PyValueError;
+use ndarray::Array2;
+use numpy::{PyArray1, PyArrayMethods};
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
 use crate::error::HdbscanError;
@@ -24,6 +25,25 @@ fn parse_metric(metric: &str, p: Option<f64>) -> PyResult<Metric> {
             metric
         ))),
     }
+}
+
+/// Extract a 2-D f64 array from a numpy ndarray, accepting f32 or f64.
+fn extract_f64_array(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Array2<f64>> {
+    // Try f64 first (zero-copy)
+    if let Ok(arr) = obj.downcast::<numpy::PyArray2<f64>>() {
+        return Ok(arr.readonly().as_array().to_owned());
+    }
+    // Try f32 and upcast
+    if let Ok(arr) = obj.downcast::<numpy::PyArray2<f32>>() {
+        let view = arr.readonly();
+        let view = view.as_array();
+        let shape = (view.nrows(), view.ncols());
+        let data: Vec<f64> = view.iter().map(|&v| v as f64).collect();
+        return Ok(Array2::from_shape_vec(shape, data).unwrap());
+    }
+    Err(PyTypeError::new_err(
+        "Expected a 2-D numpy array with dtype float32 or float64",
+    ))
 }
 
 fn parse_cluster_selection_method(method: &str) -> PyResult<ClusterSelectionMethod> {
@@ -119,10 +139,10 @@ impl HDBSCAN {
     fn fit_predict<'py>(
         &mut self,
         py: Python<'py>,
-        x: PyReadonlyArray2<f64>,
+        x: &Bound<'py, pyo3::types::PyAny>,
     ) -> PyResult<Bound<'py, PyArray1<i32>>> {
-        let data = x.as_array();
-        let labels = self.inner.fit_predict(&data).map_err(to_py_err)?;
+        let data = extract_f64_array(x)?;
+        let labels = self.inner.fit_predict(&data.view()).map_err(to_py_err)?;
         Ok(PyArray1::from_vec(py, labels))
     }
 
@@ -132,9 +152,9 @@ impl HDBSCAN {
     /// ----------
     /// X : numpy.ndarray of shape (n_samples, n_features)
     ///     Training data.
-    fn fit(&mut self, x: PyReadonlyArray2<f64>) -> PyResult<()> {
-        let data = x.as_array();
-        self.inner.fit(&data).map_err(to_py_err)
+    fn fit(&mut self, x: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
+        let data = extract_f64_array(x)?;
+        self.inner.fit(&data.view()).map_err(to_py_err)
     }
 
     /// Predict cluster labels for new points.
@@ -153,10 +173,13 @@ impl HDBSCAN {
     fn approximate_predict<'py>(
         &self,
         py: Python<'py>,
-        x: PyReadonlyArray2<f64>,
+        x: &Bound<'py, pyo3::types::PyAny>,
     ) -> PyResult<(Bound<'py, PyArray1<i32>>, Bound<'py, PyArray1<f64>>)> {
-        let data = x.as_array();
-        let (labels, probs) = self.inner.approximate_predict(&data).map_err(to_py_err)?;
+        let data = extract_f64_array(x)?;
+        let (labels, probs) = self
+            .inner
+            .approximate_predict(&data.view())
+            .map_err(to_py_err)?;
         Ok((
             PyArray1::from_vec(py, labels),
             PyArray1::from_vec(py, probs),
