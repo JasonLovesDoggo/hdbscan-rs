@@ -71,15 +71,20 @@ fn compute_core_distances_tree<T: CoreDistQuery>(
     k: usize,
 ) -> (Array1<f64>, Vec<usize>) {
     let n = data.nrows();
+    let dim = data.ncols();
     let mut core_distances = Array1::zeros(n);
     let mut nn_indices = vec![0usize; n];
+
+    // Get contiguous flat data to avoid per-query ndarray view overhead
+    let data_contiguous = data.as_standard_layout();
+    let data_slice = data_contiguous.as_slice().unwrap();
 
     // Reuse a single heap across all queries to avoid n allocations
     let mut heap = crate::knn_heap::KnnHeap::new(k);
     for i in 0..n {
         heap.clear();
-        let query = data.row(i);
-        tree.query_core_dist_reuse(query.as_slice().unwrap(), k, i, &mut heap);
+        let query = &data_slice[i * dim..(i + 1) * dim];
+        tree.query_core_dist_reuse(query, k, i, &mut heap);
         core_distances[i] = heap.max_dist_sq().sqrt();
         nn_indices[i] = heap.nearest_non_self(i);
     }
