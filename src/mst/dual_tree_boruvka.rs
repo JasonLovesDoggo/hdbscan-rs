@@ -114,14 +114,38 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
     let mut round = 0;
     let mut merge_edges: Vec<(f64, usize, usize)> = Vec::new();
     while n_components > 1 {
-        // Reset component bests
-        for best in component_best.iter_mut() {
-            best.mr_dist_sq = f64::INFINITY;
-        }
-
         // Cache component IDs for all points (avoids repeated uf.find() in traversal)
         for i in 0..n {
             point_component[i] = uf.find(i);
+        }
+
+        // Preserve valid cross-component edges from previous round instead of
+        // resetting to infinity. Only invalidate edges that became same-component
+        // after merging. This gives tighter initial bounds for dual-tree pruning.
+        if round == 0 {
+            // First round: propagate seeded bounds to component roots
+            for i in 0..n {
+                let comp = point_component[i];
+                if comp != i && component_best[i].mr_dist_sq < component_best[comp].mr_dist_sq {
+                    component_best[comp] = component_best[i];
+                }
+            }
+        } else {
+            // Subsequent rounds: keep valid edges, invalidate same-component ones
+            for i in 0..n {
+                if point_component[i] != i {
+                    // Not a component root — will inherit from root
+                    continue;
+                }
+                let best = &component_best[i];
+                if best.mr_dist_sq < f64::INFINITY {
+                    let comp_from = point_component[best.from];
+                    let comp_to = point_component[best.to];
+                    if comp_from == comp_to {
+                        component_best[i].mr_dist_sq = f64::INFINITY;
+                    }
+                }
+            }
         }
 
         // Compute per-node component labels for O(1) same-component pruning.

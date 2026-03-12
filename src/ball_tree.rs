@@ -4,6 +4,10 @@
 //! each node with a hypersphere (centroid + radius). This provides much
 //! tighter distance bounds in dimensions > ~8, where kd-tree bounding box
 //! pruning degrades due to the curse of dimensionality.
+//!
+//! Centroids are stored in Structure-of-Arrays layout: a single contiguous
+//! f64 array indexed by `node_idx * dim + d`. This eliminates per-node Vec
+//! allocations and improves cache locality in the hot distance computation loops.
 
 use ndarray::ArrayView2;
 
@@ -13,12 +17,9 @@ pub const LEAF_SIZE: usize = 40;
 
 pub const NO_CHILD: usize = usize::MAX;
 
-/// A ball tree node. Each node represents a hypersphere containing all
-/// its descendant points.
-#[derive(Clone)]
+/// A ball tree node (without centroid data — stored in SoA array on the tree).
+#[derive(Clone, Copy)]
 pub struct BallNode {
-    /// Centroid of the bounding ball
-    pub centroid: Vec<f64>,
     /// Squared radius of the bounding ball (max squared dist from centroid to any point)
     pub radius_sq: f64,
     /// Radius of the bounding ball
@@ -39,8 +40,13 @@ pub struct BallNode {
 
 /// Ball tree for dual-tree algorithms.
 /// Points are stored only in leaves; internal nodes contain bounding ball metadata.
+///
+/// Centroids use SoA layout for cache-friendly access:
+/// `centroids[node_idx * dim + d]` gives the centroid coordinate for node `node_idx` in dimension `d`.
 pub struct BallTree {
     pub nodes: Vec<BallNode>,
+    /// Contiguous centroid storage: `centroids[node * dim + d]`
+    pub centroids: Vec<f64>,
     /// The raw data, stored as a flat [n * dim] array for cache efficiency.
     pub data: Vec<f64>,
     pub dim: usize,
@@ -59,14 +65,17 @@ impl BallTree {
         let flat_data: Vec<f64> = data_contiguous.as_slice().unwrap().to_vec();
 
         let mut sorted_indices: Vec<usize> = (0..n).collect();
-        let mut nodes = Vec::with_capacity(2 * n / LEAF_SIZE + 1);
+        let max_nodes = 2 * n / LEAF_SIZE + 1;
+        let mut nodes = Vec::with_capacity(max_nodes);
+        let mut centroids_buf = Vec::with_capacity(max_nodes * dim);
 
         if n > 0 {
-            Self::build_recursive(&flat_data, &mut sorted_indices, 0, n, dim, &mut nodes);
+            Self::build_recursive(&flat_data, &mut sorted_indices, 0, n, dim, &mut nodes, &mut centroids_buf);
         }
 
         BallTree {
             nodes,
+            centroids: centroids_buf,
             data: flat_data,
             dim,
             n,
@@ -81,6 +90,7 @@ impl BallTree {
         end: usize,
         dim: usize,
         nodes: &mut Vec<BallNode>,
+        centroids_buf: &mut Vec<f64>,
     ) -> usize {
         if start >= end {
             return NO_CHILD;
@@ -88,8 +98,11 @@ impl BallTree {
 
         let count = end - start;
 
-        // Compute centroid
-        let mut centroid = vec![0.0f64; dim];
+        // Compute centroid into the SoA buffer
+        let centroid_start = centroids_buf.len();
+        centroids_buf.extend(std::iter::repeat(0.0f64).take(dim));
+        let centroid = &mut centroids_buf[centroid_start..centroid_start + dim];
+
         for &idx in &indices[start..end] {
             let base = idx * dim;
             for d in 0..dim {
@@ -121,8 +134,8 @@ impl BallTree {
         // Leaf node
         if count <= LEAF_SIZE {
             let node_idx = nodes.len();
+            debug_assert_eq!(node_idx * dim, centroid_start);
             nodes.push(BallNode {
-                centroid,
                 radius_sq,
                 radius,
                 left: NO_CHILD,
@@ -155,25 +168,11 @@ impl BallTree {
         // Project all points onto the line between farthest_a and farthest_b,
         // partition around the median projection.
         let base_b = farthest_b * dim;
-        let mut projections: Vec<f64> = Vec::with_capacity(count);
-        for &idx in &indices[start..end] {
-            let base = idx * dim;
-            let mut proj = 0.0f64;
-            for d in 0..dim {
-                let dir = data[base_b + d] - data[base_a + d];
-                let offset = data[base + d] - data[base_a + d];
-                proj += dir * offset;
-            }
-            projections.push(proj);
-        }
 
         // Partition around median using select_nth_unstable
         let mid = start + count / 2;
         let proj_slice = &mut indices[start..end];
         proj_slice.select_nth_unstable_by(mid - start, |&a_idx, &b_idx| {
-            // Find positions of a_idx and b_idx in the original indices to get projections
-            // This is tricky because select_nth_unstable moves elements around.
-            // Instead, recompute projections inline.
             let base_ai = a_idx * dim;
             let base_bi = b_idx * dim;
             let mut proj_a = 0.0f64;
@@ -189,8 +188,8 @@ impl BallTree {
         });
 
         let node_idx = nodes.len();
+        debug_assert_eq!(node_idx * dim, centroid_start);
         nodes.push(BallNode {
-            centroid,
             radius_sq,
             radius,
             left: NO_CHILD,
@@ -201,13 +200,20 @@ impl BallTree {
             is_leaf: false,
         });
 
-        let left = Self::build_recursive(data, indices, start, mid, dim, nodes);
-        let right = Self::build_recursive(data, indices, mid, end, dim, nodes);
+        let left = Self::build_recursive(data, indices, start, mid, dim, nodes, centroids_buf);
+        let right = Self::build_recursive(data, indices, mid, end, dim, nodes, centroids_buf);
 
         nodes[node_idx].left = left;
         nodes[node_idx].right = right;
 
         node_idx
+    }
+
+    /// Get centroid slice for a node (from SoA storage).
+    #[inline]
+    pub fn centroid(&self, node_idx: usize) -> &[f64] {
+        let off = node_idx * self.dim;
+        unsafe { self.centroids.get_unchecked(off..off + self.dim) }
     }
 
     /// Minimum possible squared distance between two ball tree nodes.
@@ -217,7 +223,7 @@ impl BallTree {
         let b = &self.nodes[node_b];
 
         let centroid_dist_sq =
-            crate::simd_distance::squared_euclidean_simd(&a.centroid, &b.centroid);
+            crate::simd_distance::squared_euclidean_simd(self.centroid(node_a), self.centroid(node_b));
         let centroid_dist = centroid_dist_sq.sqrt();
         let gap = centroid_dist - a.radius - b.radius;
 
@@ -251,7 +257,7 @@ impl BallTree {
         let mut heap = crate::knn_heap::KnnHeap::new(k);
         let mut sqrt_max_dist = f64::INFINITY;
         let root_centroid_dist_sq =
-            crate::simd_distance::squared_euclidean_simd(query, &self.nodes[0].centroid);
+            crate::simd_distance::squared_euclidean_simd(query, self.centroid(0));
         self.knn_recursive(0, query, &mut heap, &mut sqrt_max_dist, root_centroid_dist_sq);
         let core_dist = heap.max_dist_sq().sqrt();
         let nn = heap.nearest_non_self(self_idx);
@@ -267,9 +273,22 @@ impl BallTree {
         // Cache sqrt(max_dist) to avoid sqrt in the pruning hot path.
         let mut sqrt_max_dist = f64::INFINITY;
         let root_centroid_dist_sq =
-            crate::simd_distance::squared_euclidean_simd(query, &self.nodes[0].centroid);
+            crate::simd_distance::squared_euclidean_simd(query, self.centroid(0));
         self.knn_recursive(0, query, &mut heap, &mut sqrt_max_dist, root_centroid_dist_sq);
         heap.into_sorted_distances()
+    }
+
+    /// Public wrapper for knn_recursive, used by CoreDistQuery::query_core_dist_reuse.
+    #[inline]
+    pub fn knn_recursive_pub(
+        &self,
+        node_idx: usize,
+        query: &[f64],
+        heap: &mut crate::knn_heap::KnnHeap,
+        sqrt_max_dist: &mut f64,
+        centroid_dist_sq: f64,
+    ) {
+        self.knn_recursive(node_idx, query, heap, sqrt_max_dist, centroid_dist_sq);
     }
 
     fn knn_recursive(
@@ -313,13 +332,13 @@ impl BallTree {
 
             // Compute centroid distances to children — passed down to avoid recomputation
             let left_centroid_dist_sq = if left != NO_CHILD {
-                crate::simd_distance::squared_euclidean_simd(query, &self.nodes[left].centroid)
+                crate::simd_distance::squared_euclidean_simd(query, self.centroid(left))
             } else {
                 f64::INFINITY
             };
 
             let right_centroid_dist_sq = if right != NO_CHILD {
-                crate::simd_distance::squared_euclidean_simd(query, &self.nodes[right].centroid)
+                crate::simd_distance::squared_euclidean_simd(query, self.centroid(right))
             } else {
                 f64::INFINITY
             };

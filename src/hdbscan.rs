@@ -207,7 +207,7 @@ impl Hdbscan {
         if use_prims {
             // Fused core+Prim's: compute all pairwise distances once (GEMM for high dim,
             // SIMD for low dim), extract core distances, then run Prim's with O(1) lookups.
-            // At dim > 16, per-distance cost makes sharing computation worthwhile.
+            // Only worthwhile at dim > 16 where per-distance cost justifies caching.
             if matches!(self.params.metric, Metric::Euclidean) && self.params.alpha == 1.0
                 && dim > 16 {
                 mst::prim::fused_core_and_prim(data, min_samples)

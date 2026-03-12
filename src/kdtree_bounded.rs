@@ -3,11 +3,16 @@
 //! Points are stored ONLY in leaf nodes. Internal nodes are pure split nodes
 //! with bounding box metadata for pruning. This is the standard structure
 //! for dual-tree algorithms.
+//!
+//! Bounding boxes are stored in Structure-of-Arrays layout: two contiguous
+//! f64 arrays (all mins, all maxes) indexed by `node_idx * dim + d`. This
+//! eliminates per-node Vec allocations and improves cache locality in the
+//! hot `min_dist_sq_node_to_node` inner loop.
 
 use ndarray::ArrayView2;
 
-/// A KD-tree node with bounding box information for subtree pruning.
-#[derive(Clone)]
+/// A KD-tree node (without bounding box data — stored in SoA arrays on the tree).
+#[derive(Clone, Copy)]
 pub struct BKdNode {
     /// Split dimension (only meaningful for internal nodes)
     pub split_dim: usize,
@@ -17,10 +22,6 @@ pub struct BKdNode {
     pub left: usize,
     /// Right child index (or NO_CHILD if leaf)
     pub right: usize,
-    /// Bounding box minimum for each dimension
-    pub bbox_min: Vec<f64>,
-    /// Bounding box maximum for each dimension
-    pub bbox_max: Vec<f64>,
     /// Number of points in this subtree
     pub count: usize,
     /// Start index in the sorted_indices array
@@ -47,8 +48,15 @@ pub fn leaf_size(dim: usize) -> usize {
 
 /// KD-tree with bounding boxes for dual-tree algorithms.
 /// Points are stored only in leaves; internal nodes contain split metadata.
+///
+/// Bounding boxes use SoA layout for cache-friendly access:
+/// `bbox_min[node_idx * dim + d]` gives the minimum value for node `node_idx` in dimension `d`.
 pub struct BoundedKdTree {
     pub nodes: Vec<BKdNode>,
+    /// Contiguous bounding box minimums: `bbox_min[node * dim + d]`
+    pub bbox_min: Vec<f64>,
+    /// Contiguous bounding box maximums: `bbox_max[node * dim + d]`
+    pub bbox_max: Vec<f64>,
     /// The raw data, stored as a flat [n * dim] array for cache efficiency.
     pub data: Vec<f64>,
     pub dim: usize,
@@ -68,14 +76,28 @@ impl BoundedKdTree {
 
         let mut sorted_indices: Vec<usize> = (0..n).collect();
         let ls = leaf_size(dim);
-        let mut nodes = Vec::with_capacity(2 * n / ls + 1);
+        let max_nodes = 2 * n / ls + 1;
+        let mut nodes = Vec::with_capacity(max_nodes);
+        let mut bbox_min_buf = Vec::with_capacity(max_nodes * dim);
+        let mut bbox_max_buf = Vec::with_capacity(max_nodes * dim);
 
         if n > 0 {
-            Self::build_recursive(&flat_data, &mut sorted_indices, 0, n, dim, &mut nodes);
+            Self::build_recursive(
+                &flat_data,
+                &mut sorted_indices,
+                0,
+                n,
+                dim,
+                &mut nodes,
+                &mut bbox_min_buf,
+                &mut bbox_max_buf,
+            );
         }
 
         BoundedKdTree {
             nodes,
+            bbox_min: bbox_min_buf,
+            bbox_max: bbox_max_buf,
             data: flat_data,
             dim,
             n,
@@ -90,6 +112,8 @@ impl BoundedKdTree {
         end: usize,
         dim: usize,
         nodes: &mut Vec<BKdNode>,
+        bbox_min_buf: &mut Vec<f64>,
+        bbox_max_buf: &mut Vec<f64>,
     ) -> usize {
         if start >= end {
             return NO_CHILD;
@@ -97,18 +121,23 @@ impl BoundedKdTree {
 
         let count = end - start;
 
-        // Compute bounding box
-        let mut bbox_min = vec![f64::INFINITY; dim];
-        let mut bbox_max = vec![f64::NEG_INFINITY; dim];
+        // Compute bounding box into temporary storage
+        let bb_start = bbox_min_buf.len();
+        bbox_min_buf.extend(std::iter::repeat(f64::INFINITY).take(dim));
+        bbox_max_buf.extend(std::iter::repeat(f64::NEG_INFINITY).take(dim));
+
+        let bb_min = &mut bbox_min_buf[bb_start..bb_start + dim];
+        let bb_max = &mut bbox_max_buf[bb_start..bb_start + dim];
+
         for &idx in &indices[start..end] {
             let base = idx * dim;
             for d in 0..dim {
                 let v = data[base + d];
-                if v < bbox_min[d] {
-                    bbox_min[d] = v;
+                if v < bb_min[d] {
+                    bb_min[d] = v;
                 }
-                if v > bbox_max[d] {
-                    bbox_max[d] = v;
+                if v > bb_max[d] {
+                    bb_max[d] = v;
                 }
             }
         }
@@ -116,13 +145,12 @@ impl BoundedKdTree {
         // Leaf node: store all points
         if count <= leaf_size(dim) {
             let node_idx = nodes.len();
+            debug_assert_eq!(node_idx * dim, bb_start);
             nodes.push(BKdNode {
                 split_dim: 0,
                 split_val: 0.0,
                 left: NO_CHILD,
                 right: NO_CHILD,
-                bbox_min,
-                bbox_max,
                 count,
                 idx_start: start,
                 idx_end: end,
@@ -135,7 +163,7 @@ impl BoundedKdTree {
         let mut best_dim = 0;
         let mut best_spread = f64::NEG_INFINITY;
         for d in 0..dim {
-            let spread = bbox_max[d] - bbox_min[d];
+            let spread = bb_max[d] - bb_min[d];
             if spread > best_spread {
                 best_spread = spread;
                 best_dim = d;
@@ -153,13 +181,12 @@ impl BoundedKdTree {
         let split_val = data[indices[mid] * dim + best_dim];
 
         let node_idx = nodes.len();
+        debug_assert_eq!(node_idx * dim, bb_start);
         nodes.push(BKdNode {
             split_dim: best_dim,
             split_val,
             left: NO_CHILD,
             right: NO_CHILD,
-            bbox_min,
-            bbox_max,
             count,
             idx_start: start,
             idx_end: end,
@@ -167,8 +194,8 @@ impl BoundedKdTree {
         });
 
         // All points go into children — no point stored at internal node
-        let left = Self::build_recursive(data, indices, start, mid, dim, nodes);
-        let right = Self::build_recursive(data, indices, mid, end, dim, nodes);
+        let left = Self::build_recursive(data, indices, start, mid, dim, nodes, bbox_min_buf, bbox_max_buf);
+        let right = Self::build_recursive(data, indices, mid, end, dim, nodes, bbox_min_buf, bbox_max_buf);
 
         nodes[node_idx].left = left;
         nodes[node_idx].right = right;
@@ -179,22 +206,22 @@ impl BoundedKdTree {
     /// Compute the minimum possible squared distance between two nodes' bounding boxes.
     #[inline]
     pub fn min_dist_sq_node_to_node(&self, node_a: usize, node_b: usize) -> f64 {
-        let a = &self.nodes[node_a];
-        let b = &self.nodes[node_b];
-        let a_min = a.bbox_min.as_slice();
-        let a_max = a.bbox_max.as_slice();
-        let b_min = b.bbox_min.as_slice();
-        let b_max = b.bbox_max.as_slice();
         let dim = self.dim;
+        let off_a = node_a * dim;
+        let off_b = node_b * dim;
+        let a_min = &self.bbox_min;
+        let a_max = &self.bbox_max;
+        let b_min = &self.bbox_min;
+        let b_max = &self.bbox_max;
         let mut dist_sq = 0.0f64;
         // Branchless: for each dim, gap = max(a_lo - b_hi, 0) + max(b_lo - a_hi, 0).
         // At most one term is non-zero. Compiles to maxpd + vfmadd (SIMD-friendly).
         for d in 0..dim {
             unsafe {
-                let a_lo = *a_min.get_unchecked(d);
-                let a_hi = *a_max.get_unchecked(d);
-                let b_lo = *b_min.get_unchecked(d);
-                let b_hi = *b_max.get_unchecked(d);
+                let a_lo = *a_min.get_unchecked(off_a + d);
+                let a_hi = *a_max.get_unchecked(off_a + d);
+                let b_lo = *b_min.get_unchecked(off_b + d);
+                let b_hi = *b_max.get_unchecked(off_b + d);
                 let gap = f64::max(a_lo - b_hi, 0.0) + f64::max(b_lo - a_hi, 0.0);
                 dist_sq += gap * gap;
             }
@@ -239,19 +266,24 @@ impl BoundedKdTree {
         heap.into_sorted_distances()
     }
 
+    /// Public wrapper for knn_recursive, used by CoreDistQuery::query_core_dist_reuse.
+    #[inline]
+    pub fn knn_recursive_pub(&self, node_idx: usize, query: &[f64], heap: &mut crate::knn_heap::KnnHeap) {
+        self.knn_recursive(node_idx, query, heap);
+    }
+
     fn knn_recursive(&self, node_idx: usize, query: &[f64], heap: &mut crate::knn_heap::KnnHeap) {
         let node = &self.nodes[node_idx];
         let dim = self.dim;
 
-        // Pruning: min distance from query to bounding box
+        // Pruning: min distance from query to bounding box (SoA access)
         let mut min_dist_sq = 0.0f64;
-        let bbox_min = node.bbox_min.as_slice();
-        let bbox_max = node.bbox_max.as_slice();
+        let bb_off = node_idx * dim;
         for d in 0..dim {
             unsafe {
                 let q = *query.get_unchecked(d);
-                let lo = *bbox_min.get_unchecked(d);
-                let hi = *bbox_max.get_unchecked(d);
+                let lo = *self.bbox_min.get_unchecked(bb_off + d);
+                let hi = *self.bbox_max.get_unchecked(bb_off + d);
                 let gap = f64::max(lo - q, 0.0) + f64::max(q - hi, 0.0);
                 min_dist_sq += gap * gap;
             }
@@ -314,6 +346,12 @@ mod tests {
         // Root should contain all 6 points
         let root = &tree.nodes[0];
         assert_eq!(root.count, 6);
+
+        // Verify SoA bbox data is correct for root (node 0)
+        assert_eq!(tree.bbox_min[0], 0.0); // dim 0 min
+        assert_eq!(tree.bbox_min[1], 0.0); // dim 1 min
+        assert_eq!(tree.bbox_max[0], 11.0); // dim 0 max
+        assert_eq!(tree.bbox_max[1], 10.0); // dim 1 max
     }
 
     #[test]

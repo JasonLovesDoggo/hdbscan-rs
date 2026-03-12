@@ -18,6 +18,12 @@ impl KnnHeap {
         }
     }
 
+    /// Reset for reuse without deallocating.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
     #[inline]
     pub fn push(&mut self, dist_sq: f64, idx: usize) {
         if self.items.len() < self.capacity {

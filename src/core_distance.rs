@@ -74,11 +74,14 @@ fn compute_core_distances_tree<T: CoreDistQuery>(
     let mut core_distances = Array1::zeros(n);
     let mut nn_indices = vec![0usize; n];
 
+    // Reuse a single heap across all queries to avoid n allocations
+    let mut heap = crate::knn_heap::KnnHeap::new(k);
     for i in 0..n {
+        heap.clear();
         let query = data.row(i);
-        let (core_dist, nn) = tree.query_core_dist(query.as_slice().unwrap(), k, i);
-        core_distances[i] = core_dist;
-        nn_indices[i] = nn;
+        tree.query_core_dist_reuse(query.as_slice().unwrap(), k, i, &mut heap);
+        core_distances[i] = heap.max_dist_sq().sqrt();
+        nn_indices[i] = heap.nearest_non_self(i);
     }
 
     (core_distances, nn_indices)
@@ -87,17 +90,32 @@ fn compute_core_distances_tree<T: CoreDistQuery>(
 /// Trait for tree structures that can answer core distance queries.
 pub trait CoreDistQuery {
     fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize);
+    /// kNN search using a pre-allocated, pre-cleared heap (avoids per-query allocation).
+    fn query_core_dist_reuse(&self, query: &[f64], k: usize, self_idx: usize, heap: &mut crate::knn_heap::KnnHeap);
 }
 
 impl CoreDistQuery for BoundedKdTree {
     fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
         self.query_core_dist(query, k, self_idx)
     }
+    fn query_core_dist_reuse(&self, query: &[f64], _k: usize, _self_idx: usize, heap: &mut crate::knn_heap::KnnHeap) {
+        if !self.nodes.is_empty() {
+            self.knn_recursive_pub(0, query, heap);
+        }
+    }
 }
 
 impl CoreDistQuery for BallTree {
     fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
         self.query_core_dist(query, k, self_idx)
+    }
+    fn query_core_dist_reuse(&self, query: &[f64], _k: usize, _self_idx: usize, heap: &mut crate::knn_heap::KnnHeap) {
+        if !self.nodes.is_empty() {
+            let mut sqrt_max_dist = f64::INFINITY;
+            let root_centroid_dist_sq =
+                crate::simd_distance::squared_euclidean_simd(query, self.centroid(0));
+            self.knn_recursive_pub(0, query, heap, &mut sqrt_max_dist, root_centroid_dist_sq);
+        }
     }
 }
 
@@ -117,8 +135,9 @@ fn compute_core_distances_brute_euclidean_with_nn(
     let mut core_distances = Array1::zeros(n);
     let mut nn_indices = vec![0usize; n];
 
+    let mut heap = KnnHeap::new(k);
     for i in 0..n {
-        let mut heap = KnnHeap::new(k);
+        heap.clear();
         for j in 0..n {
             let d_sq = crate::simd_distance::squared_euclidean_flat(data_slice, i, j, dim);
             heap.push(d_sq, j);
