@@ -231,6 +231,63 @@ def test_large_dataset():
     print(f"  large_dataset: OK ({n_clusters} clusters, {n_noise} noise)")
 
 
+def test_fit_keyword_arg():
+    """sklearn code uses fit(X=data) with keyword argument."""
+    data = np.array([
+        [0.0, 0.0], [0.1, 0.0], [0.0, 0.1], [0.1, 0.1], [0.05, 0.05],
+        [10.0, 10.0], [10.1, 10.0], [10.0, 10.1], [10.1, 10.1], [10.05, 10.05],
+    ])
+    h = HDBSCAN(min_cluster_size=3)
+    # Must accept X as keyword argument (sklearn convention)
+    result = h.fit(X=data)
+    assert result is h, "fit() should return self for chaining"
+    labels = h.labels_
+    assert len(labels) == 10
+    assert labels[0] != labels[5]
+
+    # fit_predict with keyword arg too
+    h2 = HDBSCAN(min_cluster_size=3)
+    labels2 = h2.fit_predict(X=data)
+    assert len(labels2) == 10
+    print("  fit_keyword_arg: OK")
+
+
+def test_n_features_in():
+    """sklearn pipelines check n_features_in_ after fitting."""
+    data = np.random.RandomState(42).randn(50, 7)
+    h = HDBSCAN(min_cluster_size=5)
+    h.fit(data)
+    assert h.n_features_in_ == 7
+    print("  n_features_in: OK")
+
+
+def test_cluster_persistence():
+    """cluster_persistence_ should be available after fitting."""
+    data = np.array([
+        [0.0, 0.0], [0.1, 0.0], [0.0, 0.1], [0.1, 0.1], [0.05, 0.05],
+        [10.0, 10.0], [10.1, 10.0], [10.0, 10.1], [10.1, 10.1], [10.05, 10.05],
+    ])
+    h = HDBSCAN(min_cluster_size=3)
+    h.fit(data)
+    persistence = h.cluster_persistence_
+    n_clusters = len(set(l for l in h.labels_ if l >= 0))
+    assert len(persistence) == n_clusters, f"Expected {n_clusters} persistence values, got {len(persistence)}"
+    assert all(p >= 0 for p in persistence), "Persistence values should be non-negative"
+    print(f"  cluster_persistence: OK ({persistence})")
+
+
+def test_fit_returns_self():
+    """sklearn convention: fit() returns self for method chaining."""
+    data = np.random.RandomState(42).randn(50, 3)
+    h = HDBSCAN(min_cluster_size=5)
+    result = h.fit(data)
+    assert result is h
+    # Chaining should work
+    labels = HDBSCAN(min_cluster_size=5).fit(data).labels_
+    assert len(labels) == 50
+    print("  fit_returns_self: OK")
+
+
 if __name__ == "__main__":
     print("Running Python binding tests...")
     test_two_clusters()
@@ -248,4 +305,8 @@ if __name__ == "__main__":
     test_standalone_hdbscan_dropin()
     test_bertopic_compatible_interface()
     test_large_dataset()
+    test_fit_keyword_arg()
+    test_n_features_in()
+    test_cluster_persistence()
+    test_fit_returns_self()
     print("All Python tests passed!")

@@ -24,6 +24,7 @@ pub struct Hdbscan {
     probabilities_: Option<Vec<f64>>,
     outlier_scores_: Option<Vec<f64>>,
     condensed_tree_: Option<Vec<CondensedTreeEdge>>,
+    cluster_persistence_: Option<Vec<f64>>,
     centroids_: Option<Array2<f64>>,
     medoids_: Option<Array2<f64>>,
     prediction_data_: Option<PredictionData>,
@@ -38,6 +39,7 @@ impl Hdbscan {
             probabilities_: None,
             outlier_scores_: None,
             condensed_tree_: None,
+            cluster_persistence_: None,
             centroids_: None,
             medoids_: None,
             prediction_data_: None,
@@ -137,6 +139,7 @@ impl Hdbscan {
         self.probabilities_ = Some(probs);
         self.outlier_scores_ = Some(outlier_scores);
         self.condensed_tree_ = Some(condensed);
+        self.cluster_persistence_ = Some(selection.cluster_persistence);
 
         Ok(())
     }
@@ -177,6 +180,11 @@ impl Hdbscan {
     /// Get the condensed tree (None if not fitted).
     pub fn condensed_tree(&self) -> Option<&[CondensedTreeEdge]> {
         self.condensed_tree_.as_deref()
+    }
+
+    /// Get cluster persistence values (None if not fitted).
+    pub fn cluster_persistence(&self) -> Option<&[f64]> {
+        self.cluster_persistence_.as_deref()
     }
 
     /// Get cluster centroids (None if not fitted or not requested).

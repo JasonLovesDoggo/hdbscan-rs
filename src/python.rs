@@ -72,6 +72,7 @@ pub struct HDBSCAN {
     cluster_selection_epsilon: f64,
     cluster_selection_method: String,
     allow_single_cluster: bool,
+    n_features_in_: Option<usize>,
 }
 
 #[pymethods]
@@ -122,6 +123,7 @@ impl HDBSCAN {
             cluster_selection_epsilon,
             cluster_selection_method: cluster_selection_method.to_string(),
             allow_single_cluster,
+            n_features_in_: None,
         })
     }
 
@@ -136,12 +138,14 @@ impl HDBSCAN {
     /// -------
     /// labels : numpy.ndarray of shape (n_samples,)
     ///     Cluster labels. -1 indicates noise.
+    #[pyo3(signature = (X))]
     fn fit_predict<'py>(
         &mut self,
         py: Python<'py>,
-        x: &Bound<'py, pyo3::types::PyAny>,
+        #[allow(non_snake_case)] X: &Bound<'py, pyo3::types::PyAny>,
     ) -> PyResult<Bound<'py, PyArray1<i32>>> {
-        let data = extract_f64_array(x)?;
+        let data = extract_f64_array(X)?;
+        self.n_features_in_ = Some(data.ncols());
         let labels = self.inner.fit_predict(&data.view()).map_err(to_py_err)?;
         Ok(PyArray1::from_vec(py, labels))
     }
@@ -152,9 +156,21 @@ impl HDBSCAN {
     /// ----------
     /// X : numpy.ndarray of shape (n_samples, n_features)
     ///     Training data.
-    fn fit(&mut self, x: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
-        let data = extract_f64_array(x)?;
-        self.inner.fit(&data.view()).map_err(to_py_err)
+    ///
+    /// Returns
+    /// -------
+    /// self : HDBSCAN
+    ///     Returns self for method chaining (sklearn convention).
+    #[pyo3(signature = (X))]
+    fn fit(slf: Py<Self>, X: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Py<Self>> {
+        let data = extract_f64_array(X)?;
+        Python::with_gil(|py| -> PyResult<()> {
+            let mut this = slf.borrow_mut(py);
+            this.n_features_in_ = Some(data.ncols());
+            this.inner.fit(&data.view()).map_err(to_py_err)?;
+            Ok(())
+        })?;
+        Ok(slf)
     }
 
     /// Predict cluster labels for new points.
@@ -170,12 +186,13 @@ impl HDBSCAN {
     ///     Predicted cluster labels.
     /// probabilities : numpy.ndarray of shape (n_samples,)
     ///     Prediction confidence.
+    #[pyo3(signature = (X))]
     fn approximate_predict<'py>(
         &self,
         py: Python<'py>,
-        x: &Bound<'py, pyo3::types::PyAny>,
+        #[allow(non_snake_case)] X: &Bound<'py, pyo3::types::PyAny>,
     ) -> PyResult<(Bound<'py, PyArray1<i32>>, Bound<'py, PyArray1<f64>>)> {
-        let data = extract_f64_array(x)?;
+        let data = extract_f64_array(X)?;
         let (labels, probs) = self
             .inner
             .approximate_predict(&data.view())
@@ -209,6 +226,24 @@ impl HDBSCAN {
     fn outlier_scores_<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
         match self.inner.outlier_scores() {
             Some(scores) => Ok(PyArray1::from_slice(py, scores)),
+            None => Err(PyValueError::new_err("Model has not been fitted yet")),
+        }
+    }
+
+    /// Cluster persistence values after fitting.
+    #[getter]
+    fn cluster_persistence_<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        match self.inner.cluster_persistence() {
+            Some(p) => Ok(PyArray1::from_slice(py, p)),
+            None => Err(PyValueError::new_err("Model has not been fitted yet")),
+        }
+    }
+
+    /// Number of features seen during fit.
+    #[getter]
+    fn n_features_in_(&self) -> PyResult<usize> {
+        match self.n_features_in_ {
+            Some(n) => Ok(n),
             None => Err(PyValueError::new_err("Model has not been fitted yet")),
         }
     }

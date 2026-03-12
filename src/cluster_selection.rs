@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 pub struct ClusterSelectionResult {
     /// Set of selected cluster IDs (condensed tree IDs, >= n_points)
     pub selected_clusters: HashSet<usize>,
+    /// Stability value for each selected cluster (ordered by cluster label 0, 1, 2, ...)
+    pub cluster_persistence: Vec<f64>,
 }
 
 /// Select clusters from the condensed tree.
@@ -19,6 +21,7 @@ pub fn select_clusters(
     if condensed_tree.is_empty() {
         return ClusterSelectionResult {
             selected_clusters: HashSet::new(),
+            cluster_persistence: Vec::new(),
         };
     }
 
@@ -81,8 +84,39 @@ pub fn select_clusters(
         selected
     };
 
+    // Compute cluster_persistence for selected clusters.
+    // persistence = 1/birth_lambda - 1/death_lambda for each selected cluster.
+    // Death lambda is the max lambda of any edge with that cluster as parent.
+    let mut cluster_death_lambda: HashMap<usize, f64> = HashMap::new();
+    for edge in condensed_tree {
+        let entry = cluster_death_lambda.entry(edge.parent).or_insert(0.0f64);
+        if edge.lambda_val > *entry {
+            *entry = edge.lambda_val;
+        }
+    }
+
+    // Sort selected clusters by ID for deterministic label assignment order
+    let mut sorted_selected: Vec<usize> = selected.iter().copied().collect();
+    sorted_selected.sort_unstable();
+
+    let cluster_persistence: Vec<f64> = sorted_selected
+        .iter()
+        .map(|&c| {
+            let birth = *cluster_birth_lambda.get(&c).unwrap_or(&0.0);
+            let death = *cluster_death_lambda.get(&c).unwrap_or(&0.0);
+            let inv_birth = if birth > 0.0 {
+                1.0 / birth
+            } else {
+                f64::INFINITY
+            };
+            let inv_death = if death > 0.0 { 1.0 / death } else { 0.0 };
+            (inv_birth - inv_death).max(0.0)
+        })
+        .collect();
+
     ClusterSelectionResult {
         selected_clusters: selected,
+        cluster_persistence,
     }
 }
 
