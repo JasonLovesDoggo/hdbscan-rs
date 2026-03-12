@@ -23,22 +23,34 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  pypi:
-    name: Build wheels (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+  pypi-linux:
+    name: Build wheels (linux-${{ matrix.target }})
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64
-          - os: ubuntu-latest
-            target: aarch64
-          - os: macos-latest
-            target: x86_64
-          - os: macos-latest
-            target: aarch64
-          - os: windows-latest
-            target: x86_64
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist -i 3.12 3.13
+          manylinux: auto
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: dist
+
+  pypi-macos:
+    name: Build wheels (macos-${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -49,10 +61,26 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: --release --out dist
-          manylinux: auto
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          name: wheels-macos-${{ matrix.target }}
+          path: dist
+
+  pypi-windows:
+    name: Build wheels (windows-x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-x86_64
           path: dist
 
   pypi-sdist:
@@ -72,7 +100,7 @@ jobs:
 
   pypi-publish:
     name: Publish to PyPI
-    needs: [pypi, pypi-sdist]
+    needs: [pypi-linux, pypi-macos, pypi-windows, pypi-sdist]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
