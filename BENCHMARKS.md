@@ -29,40 +29,42 @@ GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_compar
 
 | Config |   sklearn | C-hdbscan | fast-hdbscan |  hdbscan-rs | vs sklearn |  vs C | vs fast |  ARI |
 | ------ | --------: | --------: | -----------: | ----------: | ---------: | ----: | ------: | ---: |
-| 500x2D |    4.1 ms |    6.2 ms |       2.0 ms |  **1.3 ms** |       3.1x |  4.7x |    1.5x | 1.00 |
-| 1Kx2D  |    8.9 ms |   12.7 ms |       3.7 ms |  **2.6 ms** |       3.4x |  4.9x |    1.4x | 1.00 |
-| 2Kx2D  |   24.6 ms |   27.3 ms |       6.5 ms |  **4.8 ms** |       5.1x |  5.6x |    1.4x | 1.00 |
-| 5Kx2D  |    128 ms |   80.2 ms |      24.5 ms | **10.6 ms** |      12.1x |  7.6x |    2.3x | 1.00 |
-| 10Kx2D |    455 ms |    189 ms |      43.3 ms | **18.4 ms** |      24.7x | 10.3x |    2.4x | 1.00 |
-| 50Kx2D | 12,812 ms |  1,024 ms |       293 ms |  **124 ms** |       103x |  8.2x |    2.4x | 1.00 |
+| 500x2D |    4.1 ms |   10.9 ms |       2.0 ms |  **1.2 ms** |       3.3x |  8.9x |    1.6x | 1.00 |
+| 1Kx2D  |   12.0 ms |   12.7 ms |       3.8 ms |  **2.2 ms** |       5.4x |  5.8x |    1.7x | 1.00 |
+| 2Kx2D  |   32.1 ms |   27.3 ms |       6.6 ms |  **5.6 ms** |       5.7x |  4.9x |    1.2x | 1.00 |
+| 5Kx2D  |    121 ms |   76.0 ms |      20.6 ms |  **9.2 ms** |      13.1x |  8.2x |    2.2x | 1.00 |
+| 10Kx2D |    445 ms |    181 ms |      45.1 ms | **17.8 ms** |      25.0x | 10.1x |    2.5x | 1.00 |
+| 50Kx2D | 12,757 ms |  1,011 ms |       302 ms |  **101 ms** |       126x | 10.0x |    3.0x | 1.00 |
 
 ### Medium-dimensional
 
 | Config | sklearn | C-hdbscan | fast-hdbscan | hdbscan-rs | vs sklearn | vs C | vs fast |  ARI |
 | ------ | ------: | --------: | -----------: | ---------: | ---------: | ---: | ------: | ---: |
-| 5Kx10D |  241 ms |    136 ms |      72.7 ms |  **62 ms** |       3.9x | 2.2x |    1.2x | 1.00 |
-| 5Kx50D |  924 ms |    379 ms |       319 ms | **272 ms** |       3.4x | 1.4x |    1.2x | 1.00 |
+| 5Kx10D |  240 ms |    133 ms |      70.5 ms |  **49 ms** |       4.9x | 2.7x |    1.4x | 1.00 |
+| 5Kx50D |  911 ms |    369 ms |       324 ms | **268 ms** |       3.4x | 1.4x |    1.2x | 1.00 |
 
 ### High-dimensional (LLM embeddings)
 
 | Config    | sklearn | C-hdbscan | fast-hdbscan | hdbscan-rs | vs sklearn |  vs C | vs fast |  ARI |
 | --------- | ------: | --------: | -----------: | ---------: | ---------: | ----: | ------: | ---: |
-| 2Kx256D   |  926 ms |    858 ms |       180 ms |  **78 ms** |      11.9x | 11.0x |    2.3x | 1.00 |
-| 1Kx256D   |  246 ms |    230 ms |      49.0 ms |  **19 ms** |      12.6x | 11.8x |    2.6x | 1.00 |
-| 500x1536D |  424 ms |    444 ms |      87.7 ms |  **28 ms** |      14.9x | 15.7x |    3.1x | 1.00 |
+| 2Kx256D   |  914 ms |    846 ms |       185 ms |  **74 ms** |      12.4x | 11.5x |    2.5x | 1.00 |
+| 1Kx256D   |  235 ms |    230 ms |      65.4 ms |  **19 ms** |      12.1x | 11.9x |    3.4x | 1.00 |
+| 500x1536D |  412 ms |    439 ms |      80.7 ms |  **27 ms** |      15.1x | 16.0x |    3.0x | 1.00 |
 
 ### Peak memory (RSS)
 
+Each implementation runs in its own subprocess for independent measurement.
+
 | Config    | sklearn | C-hdbscan | fast-hdbscan | hdbscan-rs |
 | --------- | ------: | --------: | -----------: | ---------: |
-| 500x2D    |  128 MB |    129 MB |       468 MB |   **3 MB** |
-| 10Kx2D    |  136 MB |    137 MB |       470 MB |   **7 MB** |
-| 50Kx2D    |  161 MB |    178 MB |       479 MB |  **26 MB** |
-| 5Kx50D    |  178 MB |    178 MB |       479 MB |     207 MB |
-| 2Kx256D   |  178 MB |    178 MB |       482 MB |  **56 MB** |
-| 500x1536D |  178 MB |    178 MB |       486 MB |  **41 MB** |
+| 500x2D    |  120 MB |    121 MB |       457 MB |   **3 MB** |
+| 10Kx2D    |  126 MB |    129 MB |       459 MB |   **8 MB** |
+| 50Kx2D    |  150 MB |    169 MB |       470 MB |  **29 MB** |
+| 5Kx50D    |  125 MB |    128 MB |       460 MB |     207 MB |
+| 2Kx256D   |  126 MB |    126 MB |       463 MB |  **56 MB** |
+| 500x1536D |  130 MB |    130 MB |       466 MB |  **41 MB** |
 
-Python-based implementations carry ~128 MB baseline from the interpreter + NumPy + sklearn. fast-hdbscan adds ~340 MB from Numba JIT compilation. Rust runs as a standalone binary with no runtime overhead.
+sklearn and C-hdbscan carry ~120 MB baseline from the Python interpreter + NumPy + sklearn. fast-hdbscan adds ~340 MB from Numba JIT compilation. Rust runs as a standalone binary with no runtime overhead.
 
 Note: the 5Kx50D, 2Kx256D, and 500x1536D configs use a fused GEMM+Prim's approach that caches the Gram matrix (X@X.T) in memory. This trades memory for speed by computing all pairwise dot products via cache-blocked matrix multiply, then deriving distances as needed. The fused path is automatically selected for Euclidean metric with dim > 16.
 
@@ -108,7 +110,8 @@ Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-5
 - **Bounded KD-tree** with per-node bounding boxes for tight minimum-distance lower bounds, branchless AABB distance (compiles to maxpd SIMD)
 - **Reusable KnnHeap** -- single heap allocation reused across all n kNN queries via `clear()`, avoiding n separate alloc/dealloc cycles
 - **Shared tree construction** -- single ball/kd-tree shared between core distances and MST when both use tree-based algorithms
-- **kNN-seeded Boruvka** -- nearest neighbor indices from core distance computation seed initial component bounds
+- **kNN pre-merging** -- all k-1 nearest neighbor edges from core distance computation are used to merge components before the first Boruvka round, reducing initial component count by 30-60%
+- **Adaptive parallel Boruvka** -- query subtree count scales with component density (many small → more subtrees, few large → fewer)
 - **Cross-round edge preservation** -- valid cross-component edges from previous Boruvka round are preserved instead of reset, giving tighter initial bounds for dual-tree pruning
 - **Fused GEMM+Prim's** -- for dim > 16: compute Gram matrix X@X.T via cache-blocked matmul, extract core distances via kNN heaps, run Prim's with O(1) distance lookups derived from cached dot products
 - **Fully squared-distance Prim's** -- all comparisons in squared MR space, sqrt only at edge creation; precomputed core² for fast pruning
@@ -126,11 +129,8 @@ Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-5
 ## Reproducing
 
 ```sh
-# Install Python dependencies
-pip install scikit-learn hdbscan
-
-# Run the full comparison
-python3 tests/perf_comparison.py
+# Run the full comparison (uv auto-installs dependencies)
+uv run tests/perf_comparison.py
 
 # Quick Rust-only benchmark
 cargo run --release --example bench

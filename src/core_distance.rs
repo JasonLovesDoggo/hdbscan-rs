@@ -30,7 +30,6 @@ pub fn compute_core_distances(
 
 /// Compute core distances and nearest non-self neighbor index for each point.
 /// The nearest neighbor indices can be used to seed MST algorithms with good initial bounds.
-/// Also returns all k-1 neighbor indices per point for richer seeding.
 pub fn compute_core_distances_with_nn(
     data: &ArrayView2<f64>,
     metric: &Metric,
@@ -65,23 +64,64 @@ pub fn compute_core_distances_with_nn(
     (core_distances, nn_indices)
 }
 
-/// Compute core distances and nearest neighbors using any tree implementing CoreDistQuery.
-fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
+/// Compute core distances and ALL k-1 nearest neighbor indices for each point.
+/// Returns (core_distances, all_knn_flat) where all_knn_flat[i*k_per_point..][..k_per_point]
+/// are point i's k-1 neighbor indices. k_per_point = min_samples.min(n) - 1.
+pub fn compute_core_distances_with_all_nn(
+    data: &ArrayView2<f64>,
+    metric: &Metric,
+    min_samples: usize,
+) -> (Array1<f64>, Vec<usize>, usize) {
+    let n = data.nrows();
+    let k = min_samples.min(n);
+    let k_neighbors = k.saturating_sub(1); // exclude self
+
+    let dim = data.ncols();
+    match metric {
+        Metric::Euclidean if dim <= KDTREE_KNN_MAX_DIM => {
+            let tree = BoundedKdTree::build(data);
+            let (cd, all_nn) = compute_core_distances_tree_all_nn(&tree, data, k);
+            (cd, all_nn, k_neighbors)
+        }
+        Metric::Euclidean if dim <= BALLTREE_KNN_MAX_DIM => {
+            let tree = BallTree::build(data);
+            let (cd, all_nn) = compute_core_distances_tree_all_nn(&tree, data, k);
+            (cd, all_nn, k_neighbors)
+        }
+        _ => {
+            // Fallback: just use nearest neighbor
+            let (cd, nn) = compute_core_distances_with_nn(data, metric, min_samples);
+            let mut all = vec![0usize; n * k_neighbors];
+            for i in 0..n {
+                if k_neighbors > 0 {
+                    all[i * k_neighbors] = nn[i];
+                }
+            }
+            (cd, all, k_neighbors)
+        }
+    }
+}
+
+/// Core kNN query engine: runs parallel tree queries and extracts results.
+///
+/// When `return_all_neighbors` is true, returns all k-1 neighbor indices per point
+/// in a flat vec (for KNN pre-merging). Otherwise returns only the nearest neighbor.
+fn knn_query_tree<T: CoreDistQuery + Sync>(
     tree: &T,
     data: &ArrayView2<f64>,
     k: usize,
+    return_all_neighbors: bool,
 ) -> (Array1<f64>, Vec<usize>) {
     let n = data.nrows();
     let dim = data.ncols();
+    let k_neighbors = k.saturating_sub(1);
+    let out_per_point = if return_all_neighbors { k_neighbors } else { 1 };
     let mut core_distances = Array1::zeros(n);
-    let mut nn_indices = vec![0usize; n];
+    let mut nn_out = vec![0usize; n * out_per_point];
 
-    // Get contiguous flat data to avoid per-query ndarray view overhead
     let data_contiguous = data.as_standard_layout();
     let data_slice = data_contiguous.as_slice().unwrap();
 
-    // Parallel kNN: split queries across threads for ~linear speedup.
-    // Each thread gets its own KnnHeap and writes to disjoint output slices.
     #[cfg(not(target_arch = "wasm32"))]
     let n_threads = std::thread::available_parallelism()
         .map(|p| p.get())
@@ -91,20 +131,26 @@ fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
     let n_threads = 1usize;
 
     if n_threads <= 1 || n < 256 {
-        // Single-threaded for small n or single-core
         let mut heap = crate::knn_heap::KnnHeap::new(k);
+        let mut nbuf = vec![0usize; k_neighbors];
         for i in 0..n {
             heap.clear();
             let query = &data_slice[i * dim..(i + 1) * dim];
             tree.query_core_dist_reuse(query, k, i, &mut heap);
             core_distances[i] = heap.max_dist_sq().sqrt();
-            nn_indices[i] = heap.nearest_non_self(i);
+            if return_all_neighbors {
+                let written = heap.all_neighbors(i, &mut nbuf);
+                nn_out[i * out_per_point..i * out_per_point + written]
+                    .copy_from_slice(&nbuf[..written]);
+            } else {
+                nn_out[i] = heap.nearest_non_self(i);
+            }
         }
     } else {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let cd_ptr = core_distances.as_slice_mut().unwrap().as_mut_ptr();
-            let nn_ptr = nn_indices.as_mut_ptr();
+            let nn_ptr = nn_out.as_mut_ptr();
             let chunk_size = n.div_ceil(n_threads);
 
             // SAFETY: each thread writes to disjoint index ranges [start..end)
@@ -123,13 +169,27 @@ fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
                         let cd = cd_s;
                         let nn = nn_s;
                         let mut heap = crate::knn_heap::KnnHeap::new(k);
+                        let mut nbuf = vec![0usize; k_neighbors];
                         for i in start..end {
                             heap.clear();
                             let query = &data_slice[i * dim..(i + 1) * dim];
                             tree.query_core_dist_reuse(query, k, i, &mut heap);
                             unsafe {
                                 *cd.0.add(i) = heap.max_dist_sq().sqrt();
-                                *nn.0.add(i) = heap.nearest_non_self(i);
+                            }
+                            if return_all_neighbors {
+                                let written = heap.all_neighbors(i, &mut nbuf);
+                                unsafe {
+                                    std::ptr::copy_nonoverlapping(
+                                        nbuf.as_ptr(),
+                                        nn.0.add(i * out_per_point),
+                                        written,
+                                    );
+                                }
+                            } else {
+                                unsafe {
+                                    *nn.0.add(i) = heap.nearest_non_self(i);
+                                }
                             }
                         }
                     });
@@ -138,7 +198,25 @@ fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
         }
     }
 
-    (core_distances, nn_indices)
+    (core_distances, nn_out)
+}
+
+/// Compute core distances and nearest non-self neighbor using a tree.
+fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
+    tree: &T,
+    data: &ArrayView2<f64>,
+    k: usize,
+) -> (Array1<f64>, Vec<usize>) {
+    knn_query_tree(tree, data, k, false)
+}
+
+/// Compute core distances and ALL k-1 neighbors using a tree.
+fn compute_core_distances_tree_all_nn<T: CoreDistQuery + Sync>(
+    tree: &T,
+    data: &ArrayView2<f64>,
+    k: usize,
+) -> (Array1<f64>, Vec<usize>) {
+    knn_query_tree(tree, data, k, true)
 }
 
 /// Wrapper to send raw pointers across thread boundaries.
@@ -351,6 +429,30 @@ pub fn compute_core_distances_with_bounded_kdtree(
 ) -> (Array1<f64>, Vec<usize>) {
     let k = min_samples.min(data.nrows());
     compute_core_distances_tree(tree, data, k)
+}
+
+/// Compute core distances and ALL k-1 neighbors using an existing BallTree.
+pub fn compute_core_distances_all_nn_with_balltree(
+    tree: &BallTree,
+    data: &ArrayView2<f64>,
+    min_samples: usize,
+) -> (Array1<f64>, Vec<usize>, usize) {
+    let k = min_samples.min(data.nrows());
+    let k_neighbors = k.saturating_sub(1);
+    let (cd, all_nn) = compute_core_distances_tree_all_nn(tree, data, k);
+    (cd, all_nn, k_neighbors)
+}
+
+/// Compute core distances and ALL k-1 neighbors using an existing BoundedKdTree.
+pub fn compute_core_distances_all_nn_with_bounded_kdtree(
+    tree: &BoundedKdTree,
+    data: &ArrayView2<f64>,
+    min_samples: usize,
+) -> (Array1<f64>, Vec<usize>, usize) {
+    let k = min_samples.min(data.nrows());
+    let k_neighbors = k.saturating_sub(1);
+    let (cd, all_nn) = compute_core_distances_tree_all_nn(tree, data, k);
+    (cd, all_nn, k_neighbors)
 }
 
 #[cfg(test)]

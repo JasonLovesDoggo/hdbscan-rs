@@ -63,6 +63,8 @@ pub struct BoundedKdTree {
     /// `tree_data[pos * dim .. (pos+1) * dim]` = data for sorted_indices[pos].
     /// Enables sequential memory access when iterating leaf points.
     pub tree_data: Vec<f64>,
+    /// f32 copy of tree_data for cache-friendly leaf distance computation.
+    pub tree_data_f32: Vec<f32>,
     pub dim: usize,
     pub n: usize,
     /// Sorted point indices (each leaf's points are contiguous in this array)
@@ -106,12 +108,15 @@ impl BoundedKdTree {
             tree_data[dst..dst + dim].copy_from_slice(&flat_data[src..src + dim]);
         }
 
+        let tree_data_f32: Vec<f32> = tree_data.iter().map(|&v| v as f32).collect();
+
         BoundedKdTree {
             nodes,
             bbox_min: bbox_min_buf,
             bbox_max: bbox_max_buf,
             data: flat_data,
             tree_data,
+            tree_data_f32,
             dim,
             n,
             sorted_indices,

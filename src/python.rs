@@ -61,6 +61,7 @@ fn parse_cluster_selection_method(method: &str) -> PyResult<ClusterSelectionMeth
 ///
 /// High-performance Rust implementation with results compatible with scikit-learn.
 #[pyclass]
+#[allow(clippy::upper_case_acronyms)]
 pub struct HDBSCAN {
     inner: RustHdbscan,
     min_cluster_size: usize,
@@ -76,6 +77,7 @@ pub struct HDBSCAN {
 }
 
 #[pymethods]
+#[allow(clippy::too_many_arguments)]
 impl HDBSCAN {
     #[new]
     #[pyo3(signature = (
@@ -162,7 +164,10 @@ impl HDBSCAN {
     /// self : HDBSCAN
     ///     Returns self for method chaining (sklearn convention).
     #[pyo3(signature = (X))]
-    fn fit(slf: Py<Self>, X: &Bound<'_, pyo3::types::PyAny>) -> PyResult<Py<Self>> {
+    fn fit(
+        slf: Py<Self>,
+        #[allow(non_snake_case)] X: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<Py<Self>> {
         let data = extract_f64_array(X)?;
         Python::with_gil(|py| -> PyResult<()> {
             let mut this = slf.borrow_mut(py);
@@ -187,6 +192,7 @@ impl HDBSCAN {
     /// probabilities : numpy.ndarray of shape (n_samples,)
     ///     Prediction confidence.
     #[pyo3(signature = (X))]
+    #[allow(clippy::type_complexity)]
     fn approximate_predict<'py>(
         &self,
         py: Python<'py>,

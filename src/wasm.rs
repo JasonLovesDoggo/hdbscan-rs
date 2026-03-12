@@ -68,11 +68,13 @@ fn data_to_array2(
 /// const labels = clusterer.fit_predict(data, 6, 2);
 /// ```
 #[wasm_bindgen]
+#[allow(clippy::upper_case_acronyms)]
 pub struct HDBSCAN {
     inner: RustHdbscan,
 }
 
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 impl HDBSCAN {
     /// Create a new HDBSCAN clusterer.
     ///

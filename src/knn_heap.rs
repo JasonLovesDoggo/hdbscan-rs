@@ -92,6 +92,20 @@ impl KnnHeap {
         self.items
     }
 
+    /// Write all neighbor indices (excluding self_idx) into the output slice.
+    /// Returns the number of neighbors written.
+    #[inline]
+    pub fn all_neighbors(&self, self_idx: usize, out: &mut [usize]) -> usize {
+        let mut count = 0;
+        for &(_, idx) in &self.items {
+            if idx != self_idx && count < out.len() {
+                out[count] = idx;
+                count += 1;
+            }
+        }
+        count
+    }
+
     fn sift_up(&mut self, mut idx: usize) {
         while idx > 0 {
             let parent = (idx - 1) / 2;

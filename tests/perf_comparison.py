@@ -1,11 +1,22 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "scikit-learn",
+#     "hdbscan",
+#     "fast-hdbscan",
+#     "numpy",
+# ]
+# ///
 """Run side-by-side performance comparison: sklearn vs hdbscan (C) vs fast-hdbscan vs hdbscan-rs (Rust).
 
 Compares wall time, peak memory (RSS), and clustering quality (ARI).
+Each Python implementation runs in its own subprocess for independent memory measurement.
 
-Usage: python3 tests/perf_comparison.py
+Usage: uv run tests/perf_comparison.py
 """
 
+import json
 import os
 import resource
 import subprocess
@@ -14,22 +25,10 @@ import time
 import warnings
 
 import numpy as np
-from sklearn.cluster import HDBSCAN as SklearnHDBSCAN
 from sklearn.datasets import make_blobs
 from sklearn.metrics import adjusted_rand_score
 
 warnings.filterwarnings("ignore")
-
-# Try to import the standalone C-based hdbscan library
-try:
-    import hdbscan as hdbscan_c
-
-    HAS_C_HDBSCAN = True
-except ImportError:
-    HAS_C_HDBSCAN = False
-    print("WARNING: standalone hdbscan package not installed (pip install hdbscan)")
-
-from fast_hdbscan import HDBSCAN as FastHDBSCAN
 
 # --- Benchmark configurations ---
 # Each entry: (n_samples, n_dims, n_centers, min_cluster_size, label)
@@ -53,51 +52,62 @@ BENCHMARKS = [
 N_RUNS = 3
 
 
-def get_peak_rss_mb():
-    """Get current process peak RSS in MB (includes children)."""
-    ru = resource.getrusage(resource.RUSAGE_SELF)
-    return ru.ru_maxrss / 1024  # Linux reports in KB
+def _run_python_impl_subprocess(impl_name, data_path, min_cluster_size, n_runs):
+    """Run a Python HDBSCAN implementation in a separate subprocess for clean memory measurement.
 
+    Returns (best_time_sec, labels_list, peak_rss_mb) or (None, None, None) on failure.
+    """
+    script = f"""
+import json, resource, sys, time, warnings, numpy as np
+warnings.filterwarnings("ignore")
+X = np.loadtxt("{data_path}", delimiter=",")
+mcs = {min_cluster_size}
+n_runs = {n_runs}
+impl_name = "{impl_name}"
 
-def run_sklearn(X, min_cluster_size):
-    times = []
-    labels = None
-    for _ in range(N_RUNS):
-        hdb = SklearnHDBSCAN(min_cluster_size=min_cluster_size, copy=True)
+times = []
+labels = None
+
+if impl_name == "sklearn":
+    from sklearn.cluster import HDBSCAN
+    for _ in range(n_runs):
+        h = HDBSCAN(min_cluster_size=mcs, copy=True)
         t0 = time.perf_counter()
-        hdb.fit(X)
+        h.fit(X)
         times.append(time.perf_counter() - t0)
-        labels = hdb.labels_
-    peak_mb = get_peak_rss_mb()
-    return min(times), labels, peak_mb
+        labels = h.labels_.tolist()
+elif impl_name == "c_hdbscan":
+    import hdbscan
+    for _ in range(n_runs):
+        h = hdbscan.HDBSCAN(min_cluster_size=mcs)
+        t0 = time.perf_counter()
+        labels = h.fit_predict(X).tolist()
+        times.append(time.perf_counter() - t0)
+elif impl_name == "fast_hdbscan":
+    from fast_hdbscan import HDBSCAN
+    for _ in range(n_runs):
+        h = HDBSCAN(min_cluster_size=mcs)
+        t0 = time.perf_counter()
+        labels = h.fit_predict(X).tolist()
+        times.append(time.perf_counter() - t0)
 
-
-def run_c_hdbscan(X, min_cluster_size):
-    """Run the standalone C-based hdbscan library."""
-    if not HAS_C_HDBSCAN:
+peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+result = {{"time": min(times), "peak_rss_mb": peak_kb / 1024, "labels": labels}}
+print(json.dumps(result))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
         return None, None, None
-    times = []
-    labels = None
-    for _ in range(N_RUNS):
-        clusterer = hdbscan_c.HDBSCAN(min_cluster_size=min_cluster_size)
-        t0 = time.perf_counter()
-        labels = clusterer.fit_predict(X)
-        times.append(time.perf_counter() - t0)
-    peak_mb = get_peak_rss_mb()
-    return min(times), labels, peak_mb
-
-
-def run_fast_hdbscan(X, min_cluster_size):
-    """Run fast-hdbscan."""
-    times = []
-    labels = None
-    for _ in range(N_RUNS):
-        clusterer = FastHDBSCAN(min_cluster_size=min_cluster_size)
-        t0 = time.perf_counter()
-        labels = clusterer.fit_predict(X)
-        times.append(time.perf_counter() - t0)
-    peak_mb = get_peak_rss_mb()
-    return min(times), labels, peak_mb
+    try:
+        data = json.loads(result.stdout.strip())
+        return data["time"], data["labels"], data["peak_rss_mb"]
+    except (json.JSONDecodeError, KeyError):
+        return None, None, None
 
 
 def run_rust(data_path, min_cluster_size):
@@ -169,13 +179,14 @@ def main():
             random_state=42,
         )
 
-        # Save data for Rust
+        # Save data for all subprocesses
         data_path = os.path.join(tmp_dir, f"data_{label}.csv")
         np.savetxt(data_path, X, delimiter=",")
 
-        sk_time, sk_labels, sk_mem = run_sklearn(X, mcs)
-        c_time, c_labels, c_mem = run_c_hdbscan(X, mcs)
-        fast_time, fast_labels, fast_mem = run_fast_hdbscan(X, mcs)
+        # Run each implementation in its own subprocess
+        sk_time, sk_labels, sk_mem = _run_python_impl_subprocess("sklearn", data_path, mcs, N_RUNS)
+        c_time, c_labels, c_mem = _run_python_impl_subprocess("c_hdbscan", data_path, mcs, N_RUNS)
+        fast_time, fast_labels, fast_mem = _run_python_impl_subprocess("fast_hdbscan", data_path, mcs, N_RUNS)
         rs_time, rs_labels, rs_mem = run_rust(data_path, mcs)
 
         if rs_time is None:
@@ -183,16 +194,12 @@ def main():
             continue
 
         rs_c_count = len(set(rs_labels) - {-1})
-        ari_sk = adjusted_rand_score(sk_labels, rs_labels)
+        ari_sk = adjusted_rand_score(sk_labels, rs_labels) if sk_labels else 0.0
 
-        speedup_sk = sk_time / rs_time if rs_time > 0 else float("inf")
-        speedup_c = ""
-        c_time_str = ""
-        c_mem_str = ""
+        speedup_sk = sk_time / rs_time if sk_time and rs_time > 0 else float("inf")
 
-        if HAS_C_HDBSCAN and c_time is not None:
-            speedup_c_val = c_time / rs_time if rs_time > 0 else float("inf")
-            speedup_c = f"{speedup_c_val:.1f}x"
+        if c_time is not None:
+            speedup_c = f"{c_time / rs_time:.1f}x"
             c_time_str = f"{c_time*1000:.1f}"
             c_mem_str = f"{c_mem:.0f}MB"
         else:
@@ -200,21 +207,28 @@ def main():
             c_time_str = "N/A"
             c_mem_str = "N/A"
 
-        speedup_fast_val = fast_time / rs_time if rs_time > 0 else float("inf")
-        speedup_fast = f"{speedup_fast_val:.1f}x"
-        fast_time_str = f"{fast_time*1000:.1f}"
-        fast_mem_str = f"{fast_mem:.0f}MB"
+        if fast_time is not None:
+            speedup_fast = f"{fast_time / rs_time:.1f}x"
+            fast_time_str = f"{fast_time*1000:.1f}"
+            fast_mem_str = f"{fast_mem:.0f}MB"
+        else:
+            speedup_fast = "N/A"
+            fast_time_str = "N/A"
+            fast_mem_str = "N/A"
+
+        sk_time_str = f"{sk_time*1000:.1f}" if sk_time else "N/A"
+        sk_mem_str = f"{sk_mem:.0f}MB" if sk_mem else "N/A"
 
         print(
-            f"{label:>12} {sk_time*1000:>9.1f}ms {c_time_str:>10} {fast_time_str:>10} {rs_time*1000:>9.1f}ms "
+            f"{label:>12} {sk_time_str + 'ms':>10} {c_time_str:>10} {fast_time_str:>10} {rs_time*1000:>9.1f}ms "
             f"{speedup_sk:>6.1f}x {speedup_c:>7} {speedup_fast:>7} {ari_sk:>8.4f} "
-            f"{sk_mem:>7.0f}MB {c_mem_str:>8} {fast_mem_str:>8} {rs_mem:>7.0f}MB "
+            f"{sk_mem_str:>8} {c_mem_str:>8} {fast_mem_str:>8} {rs_mem:>7.0f}MB "
             f"{rs_c_count:>5}"
         )
 
     print()
     print(f"Runs per benchmark: {N_RUNS} (best of {N_RUNS} wall time reported)")
-    print(f"Memory: peak RSS. sklearn/C-hdb/fast-hdb share Python process; Rust runs as subprocess.")
+    print(f"Memory: peak RSS per subprocess (each impl runs in its own process).")
 
 
 if __name__ == "__main__":

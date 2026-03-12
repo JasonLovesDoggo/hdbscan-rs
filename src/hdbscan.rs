@@ -240,25 +240,37 @@ impl Hdbscan {
         } else if dim <= 16 {
             // Share bounded kd-tree between core distances and Boruvka MST
             let tree = BoundedKdTree::build(data);
-            let (core_distances, nn_indices) =
-                core_distance::compute_core_distances_with_bounded_kdtree(&tree, data, min_samples);
-            let mst_edges = mst::dual_tree_boruvka::dual_tree_boruvka_mst(
+            let (core_distances, all_nn, k_neighbors) =
+                core_distance::compute_core_distances_all_nn_with_bounded_kdtree(
+                    &tree,
+                    data,
+                    min_samples,
+                );
+            let mst_edges = mst::dual_tree_boruvka::dual_tree_boruvka_mst_full(
                 &tree,
                 &core_distances.view(),
                 self.params.alpha,
-                Some(&nn_indices),
+                None,
+                Some(&all_nn),
+                k_neighbors,
             );
             (core_distances, mst_edges)
         } else {
             // Share ball tree between core distances and Boruvka MST
             let tree = BallTree::build(data);
-            let (core_distances, nn_indices) =
-                core_distance::compute_core_distances_with_balltree(&tree, data, min_samples);
-            let mst_edges = mst::dual_tree_boruvka::dual_tree_boruvka_mst(
+            let (core_distances, all_nn, k_neighbors) =
+                core_distance::compute_core_distances_all_nn_with_balltree(
+                    &tree,
+                    data,
+                    min_samples,
+                );
+            let mst_edges = mst::dual_tree_boruvka::dual_tree_boruvka_mst_full(
                 &tree,
                 &core_distances.view(),
                 self.params.alpha,
-                Some(&nn_indices),
+                None,
+                Some(&all_nn),
+                k_neighbors,
             );
             (core_distances, mst_edges)
         }

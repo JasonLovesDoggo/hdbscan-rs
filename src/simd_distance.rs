@@ -77,6 +77,44 @@ pub fn squared_euclidean_flat(data: &[f64], i: usize, j: usize, dim: usize) -> f
     squared_euclidean_simd(a, b)
 }
 
+/// Squared Euclidean distance using f32 data, accumulated to f64 for precision.
+/// Halves memory bandwidth vs f64 — beneficial when leaf traversals are memory-bound.
+#[inline(always)]
+pub fn squared_euclidean_flat_f32(data: &[f32], i: usize, j: usize, dim: usize) -> f64 {
+    let off_i = i * dim;
+    let off_j = j * dim;
+    let a = unsafe { data.get_unchecked(off_i..off_i + dim) };
+    let b = unsafe { data.get_unchecked(off_j..off_j + dim) };
+    squared_euclidean_f32_to_f64(a, b)
+}
+
+/// Squared Euclidean distance from f32 slices, accumulated to f64.
+#[inline(always)]
+fn squared_euclidean_f32_to_f64(a: &[f32], b: &[f32]) -> f64 {
+    debug_assert_eq!(a.len(), b.len());
+    let n = a.len();
+    let mut sum0 = 0.0f64;
+    let mut sum1 = 0.0f64;
+    let chunks = n / 4;
+    let remainder = n % 4;
+    let mut i = 0;
+    for _ in 0..chunks {
+        let d0 = unsafe { *a.get_unchecked(i) as f64 - *b.get_unchecked(i) as f64 };
+        let d1 = unsafe { *a.get_unchecked(i + 1) as f64 - *b.get_unchecked(i + 1) as f64 };
+        let d2 = unsafe { *a.get_unchecked(i + 2) as f64 - *b.get_unchecked(i + 2) as f64 };
+        let d3 = unsafe { *a.get_unchecked(i + 3) as f64 - *b.get_unchecked(i + 3) as f64 };
+        sum0 += d0 * d0 + d2 * d2;
+        sum1 += d1 * d1 + d3 * d3;
+        i += 4;
+    }
+    for _ in 0..remainder {
+        let d = unsafe { *a.get_unchecked(i) as f64 - *b.get_unchecked(i) as f64 };
+        sum0 += d * d;
+        i += 1;
+    }
+    sum0 + sum1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

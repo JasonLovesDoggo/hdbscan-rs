@@ -3,7 +3,7 @@ pub mod dual_tree_boruvka;
 pub mod prim;
 
 pub use boruvka::boruvka_mst;
-pub use dual_tree_boruvka::dual_tree_boruvka_mst;
+pub use dual_tree_boruvka::{dual_tree_boruvka_mst, dual_tree_boruvka_mst_full};
 pub use prim::prim_mst;
 
 use crate::ball_tree::BallTree;

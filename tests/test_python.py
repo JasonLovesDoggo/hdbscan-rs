@@ -1,3 +1,13 @@
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "numpy",
+#     "hdbscan-rs",
+#     "scikit-learn",
+#     "hdbscan",
+# ]
+# ///
 """Tests for the hdbscan_rs Python bindings."""
 
 import numpy as np

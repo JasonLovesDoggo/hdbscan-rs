@@ -43,15 +43,15 @@ Best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Data is `make_blobs
 
 | Config    |   sklearn | C-hdbscan | fast-hdbscan |  hdbscan-rs | vs sklearn | vs fast |
 | --------- | --------: | --------: | -----------: | ----------: | ---------: | ------: |
-| 1Kx2D     |    8.9 ms |   12.7 ms |       3.7 ms |  **2.6 ms** |       3.4x |    1.4x |
-| 5Kx2D     |    128 ms |   80.2 ms |      24.5 ms | **10.6 ms** |      12.1x |    2.3x |
-| 10Kx2D    |    455 ms |    189 ms |      43.3 ms | **18.4 ms** |      24.7x |    2.4x |
-| 50Kx2D    | 12,812 ms |  1,024 ms |       293 ms |  **124 ms** |       103x |    2.4x |
-| 5Kx10D    |    241 ms |    136 ms |      72.7 ms |   **62 ms** |       3.9x |    1.2x |
-| 1Kx256D   |    246 ms |    230 ms |        49 ms |   **19 ms** |      12.6x |    2.6x |
-| 500x1536D |    424 ms |    444 ms |      87.7 ms |   **28 ms** |      14.9x |    3.1x |
+| 1Kx2D     |   12.0 ms |   12.7 ms |       3.8 ms |  **2.2 ms** |       5.4x |    1.7x |
+| 5Kx2D     |    121 ms |   76.0 ms |      20.6 ms |  **9.2 ms** |      13.1x |    2.2x |
+| 10Kx2D    |    445 ms |    181 ms |      45.1 ms | **17.8 ms** |      25.0x |    2.5x |
+| 50Kx2D    | 12,757 ms |  1,011 ms |       302 ms |  **101 ms** |       126x |    3.0x |
+| 5Kx10D    |    240 ms |    133 ms |      70.5 ms |   **49 ms** |       4.9x |    1.4x |
+| 1Kx256D   |    235 ms |    230 ms |      65.4 ms |   **19 ms** |      12.1x |    3.4x |
+| 500x1536D |    412 ms |    439 ms |      80.7 ms |   **27 ms** |      15.1x |    3.0x |
 
-Memory: 3-56 MB (Rust) vs 128-178 MB (sklearn/C) vs 468-486 MB (fast-hdbscan + Numba JIT).
+Memory: 3-41 MB (Rust) vs 120-150 MB (sklearn) vs 121-169 MB (C-hdbscan) vs 457-470 MB (fast-hdbscan + Numba JIT).
 
 See [BENCHMARKS.md](BENCHMARKS.md) for full results, machine specs, methodology, and analysis.
 

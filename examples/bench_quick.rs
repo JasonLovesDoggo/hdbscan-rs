@@ -30,11 +30,14 @@ fn bench_config(n: usize, dim: usize, mcs: usize, runs: usize) {
 }
 
 fn main() {
-    println!("Benchmark results:");
-    bench_config(5000, 2, 10, 5);
-    bench_config(5000, 10, 10, 5);
+    println!("Benchmark results (best of 7):");
+    bench_config(1000, 2, 10, 7);
+    bench_config(2000, 2, 10, 7);
+    bench_config(5000, 2, 10, 7);
+    bench_config(10000, 2, 10, 7);
+    bench_config(50000, 2, 10, 5);
+    bench_config(5000, 10, 10, 7);
     bench_config(5000, 50, 10, 5);
-    bench_config(50000, 2, 10, 3);
-    bench_config(50000, 10, 10, 3);
-    bench_config(50000, 50, 10, 3);
+    bench_config(1000, 256, 10, 7);
+    bench_config(500, 1536, 10, 7);
 }

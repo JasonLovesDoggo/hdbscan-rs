@@ -36,6 +36,11 @@ pub trait SpatialTree {
     fn tree_data(&self) -> Option<&[f64]> {
         None
     }
+
+    /// f32 copy of tree_data for half-bandwidth leaf distance computation.
+    fn tree_data_f32(&self) -> Option<&[f32]> {
+        None
+    }
 }
 
 // --- BoundedKdTree impl ---
@@ -106,6 +111,10 @@ impl SpatialTree for crate::kdtree_bounded::BoundedKdTree {
     fn tree_data(&self) -> Option<&[f64]> {
         Some(&self.tree_data)
     }
+    #[inline]
+    fn tree_data_f32(&self) -> Option<&[f32]> {
+        Some(&self.tree_data_f32)
+    }
 }
 
 // --- BallTree impl ---
@@ -175,5 +184,9 @@ impl SpatialTree for crate::ball_tree::BallTree {
     #[inline]
     fn tree_data(&self) -> Option<&[f64]> {
         Some(&self.tree_data)
+    }
+    #[inline]
+    fn tree_data_f32(&self) -> Option<&[f32]> {
+        Some(&self.tree_data_f32)
     }
 }
