@@ -102,6 +102,9 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
     let mut node_min_core = vec![f64::INFINITY; tree.nodes().len()];
     precompute_min_core(tree, 0, core_dists, &mut node_min_core);
 
+    // Precompute squared min core distances for fast pruning
+    let node_min_core_sq: Vec<f64> = node_min_core.iter().map(|&d| d * d).collect();
+
     // Per-node component cache (recomputed each round)
     let mut node_component = vec![usize::MAX; tree.nodes().len()];
 
@@ -135,7 +138,7 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree>(
                 0,
                 core_dists,
                 &core_dists_sq,
-                &node_min_core,
+                &node_min_core_sq,
                 &point_component,
                 &mut component_best,
                 &node_component,
@@ -288,7 +291,7 @@ fn dual_tree_search<T: SpatialTree>(
     ref_node: usize,
     core_dists: &[f64],
     core_dists_sq: &[f64],
-    node_min_core: &[f64],
+    node_min_core_sq: &[f64],
     point_component: &[usize],
     component_best: &mut [ComponentBest],
     node_component: &[usize],
@@ -308,15 +311,13 @@ fn dual_tree_search<T: SpatialTree>(
 
     // === Pruning 2: MR distance lower bound (squared) ===
     let min_dist_sq = tree.min_dist_sq_node_to_node(query_node, ref_node);
-    let min_core_q = node_min_core[query_node];
-    let min_core_r = node_min_core[ref_node];
-    let min_core_max = f64::max(min_core_q, min_core_r);
-    let min_core_max_sq = min_core_max * min_core_max;
+    let min_core_max_sq = f64::max(node_min_core_sq[query_node], node_min_core_sq[ref_node]);
     // MR_lower² = max(min_core_max², min_dist_sq) when alpha == 1.0
     let mr_lower_sq = if alpha == 1.0 {
         f64::max(min_core_max_sq, min_dist_sq)
     } else {
         let min_dist = min_dist_sq.sqrt();
+        let min_core_max = min_core_max_sq.sqrt();
         let mr_lower = f64::max(min_core_max, min_dist / alpha);
         mr_lower * mr_lower
     };
@@ -411,7 +412,7 @@ fn dual_tree_search<T: SpatialTree>(
                 first,
                 core_dists,
                 core_dists_sq,
-                node_min_core,
+                node_min_core_sq,
                 point_component,
                 component_best,
                 node_component,
@@ -425,7 +426,7 @@ fn dual_tree_search<T: SpatialTree>(
                 second,
                 core_dists,
                 core_dists_sq,
-                node_min_core,
+                node_min_core_sq,
                 point_component,
                 component_best,
                 node_component,
@@ -443,7 +444,7 @@ fn dual_tree_search<T: SpatialTree>(
                 ref_node,
                 core_dists,
                 core_dists_sq,
-                node_min_core,
+                node_min_core_sq,
                 point_component,
                 component_best,
                 node_component,
@@ -457,7 +458,7 @@ fn dual_tree_search<T: SpatialTree>(
                 ref_node,
                 core_dists,
                 core_dists_sq,
-                node_min_core,
+                node_min_core_sq,
                 point_component,
                 component_best,
                 node_component,
