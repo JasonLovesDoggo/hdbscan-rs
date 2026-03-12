@@ -32,9 +32,7 @@ pub fn mst_to_single_linkage(edges: &[MstEdge], n_points: usize) -> Vec<SingleLi
         let batch_start = i;
 
         // Find end of batch with same weight
-        while i < sorted_indices.len()
-            && edges[sorted_indices[i]].weight == current_weight
-        {
+        while i < sorted_indices.len() && edges[sorted_indices[i]].weight == current_weight {
             i += 1;
         }
 
@@ -72,9 +70,21 @@ mod tests {
     #[test]
     fn test_single_linkage_basic() {
         let edges = vec![
-            MstEdge { u: 0, v: 1, weight: 1.0 },
-            MstEdge { u: 1, v: 2, weight: 2.0 },
-            MstEdge { u: 2, v: 3, weight: 3.0 },
+            MstEdge {
+                u: 0,
+                v: 1,
+                weight: 1.0,
+            },
+            MstEdge {
+                u: 1,
+                v: 2,
+                weight: 2.0,
+            },
+            MstEdge {
+                u: 2,
+                v: 3,
+                weight: 3.0,
+            },
         ];
         let merges = mst_to_single_linkage(&edges, 4);
         assert_eq!(merges.len(), 3);
@@ -90,9 +100,21 @@ mod tests {
     fn test_tied_edges() {
         // All edges have the same weight
         let edges = vec![
-            MstEdge { u: 0, v: 1, weight: 1.0 },
-            MstEdge { u: 2, v: 3, weight: 1.0 },
-            MstEdge { u: 1, v: 2, weight: 1.0 },
+            MstEdge {
+                u: 0,
+                v: 1,
+                weight: 1.0,
+            },
+            MstEdge {
+                u: 2,
+                v: 3,
+                weight: 1.0,
+            },
+            MstEdge {
+                u: 1,
+                v: 2,
+                weight: 1.0,
+            },
         ];
         let merges = mst_to_single_linkage(&edges, 4);
         assert_eq!(merges.len(), 3);

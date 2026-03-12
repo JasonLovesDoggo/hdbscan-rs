@@ -1,5 +1,5 @@
 use crate::params::StoreCenters;
-use ndarray::{ArrayView2, Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView2};
 
 /// Compute cluster centers (centroids and/or medoids).
 pub fn compute_centers(

@@ -2,10 +2,7 @@ use ndarray::ArrayView1;
 
 #[inline]
 pub fn manhattan_distance(a: &ArrayView1<f64>, b: &ArrayView1<f64>) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| (x - y).abs())
-        .sum()
+    a.iter().zip(b.iter()).map(|(&x, &y)| (x - y).abs()).sum()
 }
 
 #[cfg(test)]

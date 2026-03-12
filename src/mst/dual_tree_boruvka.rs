@@ -35,7 +35,9 @@ pub fn dual_tree_boruvka_mst(
         return vec![];
     }
 
-    let core_dists = core_distances.as_slice().expect("core distances contiguous");
+    let core_dists = core_distances
+        .as_slice()
+        .expect("core distances contiguous");
 
     let mut uf = UnionFind::new(n);
     let mut edges = Vec::with_capacity(n - 1);
@@ -214,6 +216,7 @@ fn compute_node_components_cached(
 }
 
 /// Core dual-tree traversal with per-component tracking.
+#[allow(clippy::too_many_arguments)]
 fn dual_tree_search(
     tree: &BoundedKdTree,
     query_node: usize,
@@ -325,28 +328,64 @@ fn dual_tree_search(
         let (first, second) = closer_child_first(tree, query_node, ref_node);
 
         if first != NO_CHILD {
-            dual_tree_search(tree, query_node, first, core_dists, node_min_core, point_component, component_best, node_component, alpha);
+            dual_tree_search(
+                tree,
+                query_node,
+                first,
+                core_dists,
+                node_min_core,
+                point_component,
+                component_best,
+                node_component,
+                alpha,
+            );
         }
         if second != NO_CHILD {
-            dual_tree_search(tree, query_node, second, core_dists, node_min_core, point_component, component_best, node_component, alpha);
+            dual_tree_search(
+                tree,
+                query_node,
+                second,
+                core_dists,
+                node_min_core,
+                point_component,
+                component_best,
+                node_component,
+                alpha,
+            );
         }
     } else {
         // Split the query node
         if q_node.left != NO_CHILD {
-            dual_tree_search(tree, q_node.left, ref_node, core_dists, node_min_core, point_component, component_best, node_component, alpha);
+            dual_tree_search(
+                tree,
+                q_node.left,
+                ref_node,
+                core_dists,
+                node_min_core,
+                point_component,
+                component_best,
+                node_component,
+                alpha,
+            );
         }
         if q_node.right != NO_CHILD {
-            dual_tree_search(tree, q_node.right, ref_node, core_dists, node_min_core, point_component, component_best, node_component, alpha);
+            dual_tree_search(
+                tree,
+                q_node.right,
+                ref_node,
+                core_dists,
+                node_min_core,
+                point_component,
+                component_best,
+                node_component,
+                alpha,
+            );
         }
     }
 }
 
 /// Determine which child of ref_node is closer to query_node, return (closer, farther).
-fn closer_child_first(
-    tree: &BoundedKdTree,
-    query_node: usize,
-    ref_node: usize,
-) -> (usize, usize) {
+fn closer_child_first(tree: &BoundedKdTree, query_node: usize, ref_node: usize) -> (usize, usize) {
     let r = &tree.nodes[ref_node];
     let dist_left = if r.left != NO_CHILD {
         tree.min_dist_sq_node_to_node(query_node, r.left)
@@ -390,12 +429,8 @@ mod tests {
         let tree = BoundedKdTree::build(&data.view());
 
         let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0);
-        let prim_edges = crate::mst::prim::prim_mst(
-            &data.view(),
-            &cd.view(),
-            &Metric::Euclidean,
-            1.0,
-        );
+        let prim_edges =
+            crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
 
         assert_eq!(dtb_edges.len(), 7);
 
@@ -429,12 +464,8 @@ mod tests {
         let tree = BoundedKdTree::build(&data.view());
 
         let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0);
-        let prim_edges = crate::mst::prim::prim_mst(
-            &data.view(),
-            &cd.view(),
-            &Metric::Euclidean,
-            1.0,
-        );
+        let prim_edges =
+            crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
 
         assert_eq!(dtb_edges.len(), n - 1);
 

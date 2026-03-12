@@ -70,11 +70,7 @@ fn compute_core_distances_precomputed(data: &ArrayView2<f64>, k: usize) -> Array
     core_distances
 }
 
-fn compute_core_distances_brute(
-    data: &ArrayView2<f64>,
-    metric: &Metric,
-    k: usize,
-) -> Array1<f64> {
+fn compute_core_distances_brute(data: &ArrayView2<f64>, metric: &Metric, k: usize) -> Array1<f64> {
     let n = data.nrows();
     let mut core_distances = Array1::zeros(n);
 

@@ -194,6 +194,10 @@ impl KdTree {
     pub fn len(&self) -> usize {
         self.data.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
 }
 
 /// Max-heap bounded to k items, keeping the k smallest distances.
@@ -215,14 +219,12 @@ impl BoundedMaxHeap {
             self.items.push((dist_sq, idx));
             if self.items.len() == self.capacity {
                 // Heapify to find max quickly
-                self.items
-                    .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                self.items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
             }
         } else if dist_sq < self.items[0].0 {
             self.items[0] = (dist_sq, idx);
             // Re-sort to maintain max at front
-            self.items
-                .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            self.items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         }
     }
 
@@ -242,12 +244,7 @@ mod tests {
 
     #[test]
     fn test_knn_basic() {
-        let data = array![
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [2.0, 0.0],
-            [10.0, 10.0],
-        ];
+        let data = array![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [10.0, 10.0],];
         let tree = KdTree::build(&data.view());
 
         // Nearest neighbor of [0,0] should be [1,0]
@@ -265,11 +262,7 @@ mod tests {
 
     #[test]
     fn test_knn_exclude_self() {
-        let data = array![
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [2.0, 0.0],
-        ];
+        let data = array![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0],];
         let tree = KdTree::build(&data.view());
 
         let nn = tree.query_knn_exclude_self(0, 1);

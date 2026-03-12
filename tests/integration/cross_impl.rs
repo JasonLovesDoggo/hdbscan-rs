@@ -187,7 +187,12 @@ fn run_comparison(name: &str) -> CompareResult {
     let labels_match = norm_sklearn == norm_rust;
     let ari = adjusted_rand_index(&fixture.expected_labels, &rust_labels);
 
-    let rust_clusters = rust_labels.iter().filter(|&&l| l >= 0).map(|&l| l).max().map_or(0, |m| (m + 1) as usize);
+    let rust_clusters = rust_labels
+        .iter()
+        .filter(|&&l| l >= 0)
+        .map(|&l| l)
+        .max()
+        .map_or(0, |m| (m + 1) as usize);
     let rust_noise = rust_labels.iter().filter(|&&l| l == -1).count();
 
     // Probability RMSE (only for non-noise points that match cluster assignment)
@@ -277,12 +282,22 @@ cross_impl_test!(cross_duplicates, "duplicates_n80_mcs5_eom", 0.95);
 #[test]
 fn cross_all_identical() {
     let result = run_comparison("all_identical_n30_mcs5");
-    println!("[all_identical] rust: {} clusters, {} noise", result.rust_clusters, result.rust_noise);
-    assert_eq!(result.rust_noise, result.n_points, "All identical points should be noise");
+    println!(
+        "[all_identical] rust: {} clusters, {} noise",
+        result.rust_clusters, result.rust_noise
+    );
+    assert_eq!(
+        result.rust_noise, result.n_points,
+        "All identical points should be noise"
+    );
 }
 
 // --- Single cluster ---
-cross_impl_test!(cross_single_no_allow, "single_blob_n100_mcs5_no_allow", 0.95);
+cross_impl_test!(
+    cross_single_no_allow,
+    "single_blob_n100_mcs5_no_allow",
+    0.95
+);
 cross_impl_test!(cross_single_allow, "single_blob_n100_mcs5_allow", 0.95);
 
 // --- Varying density ---
@@ -304,9 +319,16 @@ macro_rules! perf_test {
             let result = run_comparison($fixture);
             println!(
                 "[PERF {}] n={} | sklearn {:.1}ms | rust {:.1}ms | {:.2}x {}",
-                result.fixture_name, result.n_points,
-                result.sklearn_ms, result.rust_ms, result.speedup,
-                if result.speedup >= 1.0 { "faster" } else { "slower" },
+                result.fixture_name,
+                result.n_points,
+                result.sklearn_ms,
+                result.rust_ms,
+                result.speedup,
+                if result.speedup >= 1.0 {
+                    "faster"
+                } else {
+                    "slower"
+                },
             );
             println!(
                 "  clusters: sklearn={} rust={} | ARI={:.4}",
@@ -346,8 +368,20 @@ fn summary_report() {
     ];
 
     println!();
-    println!("{:<45} {:>5} {:>4}/{:<4} {:>4}/{:<4} {:>5} {:>7} {:>9} {:>9} {:>7}",
-        "fixture", "n", "sk_c", "rs_c", "sk_n", "rs_n", "exact", "ARI", "sk(ms)", "rs(ms)", "speedup");
+    println!(
+        "{:<45} {:>5} {:>4}/{:<4} {:>4}/{:<4} {:>5} {:>7} {:>9} {:>9} {:>7}",
+        "fixture",
+        "n",
+        "sk_c",
+        "rs_c",
+        "sk_n",
+        "rs_n",
+        "exact",
+        "ARI",
+        "sk(ms)",
+        "rs(ms)",
+        "speedup"
+    );
     println!("{}", "-".repeat(120));
 
     let mut total_ari = 0.0;
@@ -357,12 +391,17 @@ fn summary_report() {
         let r = run_comparison(name);
         println!(
             "{:<45} {:>5} {:>4}/{:<4} {:>4}/{:<4} {:>5} {:>7.4} {:>9.1} {:>9.1} {:>6.1}x",
-            r.fixture_name, r.n_points,
-            r.sklearn_clusters, r.rust_clusters,
-            r.sklearn_noise, r.rust_noise,
+            r.fixture_name,
+            r.n_points,
+            r.sklearn_clusters,
+            r.rust_clusters,
+            r.sklearn_noise,
+            r.rust_noise,
             if r.labels_match_exactly { "YES" } else { "no" },
             r.ari,
-            r.sklearn_ms, r.rust_ms, r.speedup,
+            r.sklearn_ms,
+            r.rust_ms,
+            r.speedup,
         );
         total_ari += r.ari;
         count += 1;

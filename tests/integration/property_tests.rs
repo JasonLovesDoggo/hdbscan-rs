@@ -9,18 +9,30 @@ fn make_blobs(n: usize, centers: &[[f64; 2]], seed: u64) -> Array2<f64> {
     let per_center = n / centers.len();
     for (c_idx, center) in centers.iter().enumerate() {
         let start = c_idx * per_center;
-        let end = if c_idx == centers.len() - 1 { n } else { start + per_center };
+        let end = if c_idx == centers.len() - 1 {
+            n
+        } else {
+            start + per_center
+        };
         for i in start..end {
             // Simple LCG pseudo-random
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u1 = (rng_state >> 33) as f64 / (1u64 << 31) as f64;
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u2 = (rng_state >> 33) as f64 / (1u64 << 31) as f64;
             // Box-Muller for Gaussian noise
             let z0 = (-2.0 * u1.max(1e-300).ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u3 = (rng_state >> 33) as f64 / (1u64 << 31) as f64;
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u4 = (rng_state >> 33) as f64 / (1u64 << 31) as f64;
             let z1 = (-2.0 * u3.max(1e-300).ln()).sqrt() * (2.0 * std::f64::consts::PI * u4).cos();
             data[[i, 0]] = center[0] + z0 * 0.5;
@@ -66,8 +78,16 @@ fn test_probabilities_range_invariant() {
     let labels = hdbscan.labels().unwrap();
 
     for i in 0..probs.len() {
-        assert!(probs[i] >= 0.0, "Probability should be >= 0, got {}", probs[i]);
-        assert!(probs[i] <= 1.0, "Probability should be <= 1, got {}", probs[i]);
+        assert!(
+            probs[i] >= 0.0,
+            "Probability should be >= 0, got {}",
+            probs[i]
+        );
+        assert!(
+            probs[i] <= 1.0,
+            "Probability should be <= 1, got {}",
+            probs[i]
+        );
 
         // Noise points should have probability 0
         if labels[i] == -1 {
@@ -191,11 +211,7 @@ fn test_varying_min_samples() {
 
 #[test]
 fn test_three_clusters_well_separated() {
-    let data = make_blobs(
-        300,
-        &[[0.0, 0.0], [20.0, 20.0], [40.0, 0.0]],
-        42,
-    );
+    let data = make_blobs(300, &[[0.0, 0.0], [20.0, 20.0], [40.0, 0.0]], 42);
     let params = HdbscanParams {
         min_cluster_size: 10,
         ..Default::default()
@@ -204,7 +220,11 @@ fn test_three_clusters_well_separated() {
     let labels = hdbscan.fit_predict(&data.view()).unwrap();
 
     let n_clusters = *labels.iter().max().unwrap() + 1;
-    assert_eq!(n_clusters, 3, "Should find exactly 3 clusters, got {}", n_clusters);
+    assert_eq!(
+        n_clusters, 3,
+        "Should find exactly 3 clusters, got {}",
+        n_clusters
+    );
 }
 
 #[test]
@@ -220,7 +240,11 @@ fn test_close_clusters_may_merge() {
     assert_eq!(labels.len(), 200);
     // Should find some clusters (close clusters might split or merge)
     let n_clusters = *labels.iter().max().unwrap() + 1;
-    assert!(n_clusters >= 1, "Should find at least 1 cluster, got {}", n_clusters);
+    assert!(
+        n_clusters >= 1,
+        "Should find at least 1 cluster, got {}",
+        n_clusters
+    );
 }
 
 #[test]
@@ -286,15 +310,26 @@ fn test_manhattan_metric() {
     let labels = hdbscan.fit_predict(&data.view()).unwrap();
     assert_eq!(labels.len(), 100);
     let n_clusters = *labels.iter().max().unwrap() + 1;
-    assert!(n_clusters >= 2, "Manhattan metric should find at least 2 clusters");
+    assert!(
+        n_clusters >= 2,
+        "Manhattan metric should find at least 2 clusters"
+    );
 }
 
 #[test]
 fn test_precomputed_symmetric() {
     // Build a small precomputed distance matrix
     let points = vec![
-        [0.0, 0.0], [0.1, 0.0], [0.0, 0.1], [0.1, 0.1], [0.05, 0.05],
-        [10.0, 10.0], [10.1, 10.0], [10.0, 10.1], [10.1, 10.1], [10.05, 10.05],
+        [0.0, 0.0],
+        [0.1, 0.0],
+        [0.0, 0.1],
+        [0.1, 0.1],
+        [0.05, 0.05],
+        [10.0, 10.0],
+        [10.1, 10.0],
+        [10.0, 10.1],
+        [10.1, 10.1],
+        [10.05, 10.05],
     ];
     let n = points.len();
     let mut dist_matrix = Array2::zeros((n, n));
@@ -321,11 +356,7 @@ fn test_precomputed_symmetric() {
 
 #[test]
 fn test_cluster_selection_epsilon() {
-    let data = make_blobs(
-        300,
-        &[[0.0, 0.0], [3.0, 3.0], [20.0, 20.0]],
-        42,
-    );
+    let data = make_blobs(300, &[[0.0, 0.0], [3.0, 3.0], [20.0, 20.0]], 42);
 
     // Without epsilon: might find 3 clusters
     let params_no_eps = HdbscanParams {
@@ -430,7 +461,11 @@ fn test_no_clusters_when_mcs_exceeds_n() {
     let labels = hdbscan.fit_predict(&data.view()).unwrap();
 
     let n_clusters = labels.iter().filter(|&&l| l >= 0).count();
-    assert_eq!(n_clusters, 0, "No clusters when min_cluster_size > n, got {} clustered points", n_clusters);
+    assert_eq!(
+        n_clusters, 0,
+        "No clusters when min_cluster_size > n, got {} clustered points",
+        n_clusters
+    );
 }
 
 /// Labels should be consecutive integers starting from 0.

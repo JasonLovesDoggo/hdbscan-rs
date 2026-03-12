@@ -65,11 +65,8 @@ impl Hdbscan {
         }
 
         // Step 1: Compute core distances
-        let core_distances = core_distance::compute_core_distances(
-            data,
-            &self.params.metric,
-            min_samples,
-        );
+        let core_distances =
+            core_distance::compute_core_distances(data, &self.params.metric, min_samples);
 
         // Step 2: Build MST on mutual reachability graph
         // Automatically selects Boruvka (O(n log² n)) for large Euclidean datasets,
@@ -129,12 +126,8 @@ impl Hdbscan {
         // Step 9: Compute centers if requested
         if let Some(store) = self.params.store_centers {
             if n_clusters > 0 {
-                let (centroids, medoids) = centers::compute_centers(
-                    data,
-                    &point_labels,
-                    n_clusters,
-                    store,
-                );
+                let (centroids, medoids) =
+                    centers::compute_centers(data, &point_labels, n_clusters, store);
                 self.centroids_ = centroids;
                 self.medoids_ = medoids;
             }
@@ -403,13 +396,7 @@ mod tests {
     #[test]
     fn test_duplicate_points() {
         // All identical points
-        let data = array![
-            [1.0, 1.0],
-            [1.0, 1.0],
-            [1.0, 1.0],
-            [1.0, 1.0],
-            [1.0, 1.0],
-        ];
+        let data = array![[1.0, 1.0], [1.0, 1.0], [1.0, 1.0], [1.0, 1.0], [1.0, 1.0],];
         let params = HdbscanParams {
             min_cluster_size: 3,
             ..Default::default()

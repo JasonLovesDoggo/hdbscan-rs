@@ -107,7 +107,10 @@ pub fn compute_probabilities(
         if edge.child < n_points {
             if let Some(&ec) = effective_cluster.get(&edge.parent) {
                 // Use the highest lambda entry for this point in this effective cluster
-                let current = point_lambda.get(&edge.child).copied().unwrap_or(f64::NEG_INFINITY);
+                let current = point_lambda
+                    .get(&edge.child)
+                    .copied()
+                    .unwrap_or(f64::NEG_INFINITY);
                 if edge.lambda_val >= current {
                     point_lambda.insert(edge.child, edge.lambda_val);
                     point_cluster_id.insert(edge.child, ec);

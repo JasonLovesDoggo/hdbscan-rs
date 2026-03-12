@@ -15,10 +15,7 @@ pub enum HdbscanError {
     InvalidMinSamples(usize),
 
     #[error("min_samples ({min_samples}) exceeds number of points ({n_points})")]
-    MinSamplesExceedsData {
-        min_samples: usize,
-        n_points: usize,
-    },
+    MinSamplesExceedsData { min_samples: usize, n_points: usize },
 
     #[error("precomputed distance matrix must be square, got {rows}x{cols}")]
     NonSquareDistanceMatrix { rows: usize, cols: usize },

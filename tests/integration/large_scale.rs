@@ -9,7 +9,9 @@ use std::time::Instant;
 
 /// Simple LCG pseudo-random number generator.
 fn lcg_next(state: &mut u64) -> f64 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     (*state >> 33) as f64 / (1u64 << 31) as f64
 }
 
@@ -78,8 +80,16 @@ fn large_scale_100k() {
 
     // Sanity checks
     assert_eq!(labels.len(), n);
-    assert!(n_clusters >= 3, "Should find at least 3 clusters, got {}", n_clusters);
-    assert!(n_clusters <= 10, "Should find at most 10 clusters, got {}", n_clusters);
+    assert!(
+        n_clusters >= 3,
+        "Should find at least 3 clusters, got {}",
+        n_clusters
+    );
+    assert!(
+        n_clusters <= 10,
+        "Should find at most 10 clusters, got {}",
+        n_clusters
+    );
     assert!(
         n_noise < n / 5,
         "Too many noise points: {} ({:.1}%)",
@@ -89,7 +99,11 @@ fn large_scale_100k() {
 
     // Performance check
     let ms = elapsed.as_secs_f64() * 1000.0;
-    println!("  Performance: {:.0}ms ({:.1} points/ms)", ms, n as f64 / ms);
+    println!(
+        "  Performance: {:.0}ms ({:.1} points/ms)",
+        ms,
+        n as f64 / ms
+    );
     assert!(
         ms < 10_000.0,
         "n=100K should complete in under 10 seconds, took {:.0}ms",
@@ -136,11 +150,23 @@ fn large_scale_1m() {
     );
 
     assert_eq!(labels.len(), n);
-    assert!(n_clusters >= 4, "Should find at least 4 clusters, got {}", n_clusters);
-    assert!(n_clusters <= 20, "Should find at most 20 clusters, got {}", n_clusters);
+    assert!(
+        n_clusters >= 4,
+        "Should find at least 4 clusters, got {}",
+        n_clusters
+    );
+    assert!(
+        n_clusters <= 20,
+        "Should find at most 20 clusters, got {}",
+        n_clusters
+    );
 
     let ms = elapsed.as_secs_f64() * 1000.0;
-    println!("  Performance: {:.0}ms ({:.1} points/ms)", ms, n as f64 / ms);
+    println!(
+        "  Performance: {:.0}ms ({:.1} points/ms)",
+        ms,
+        n as f64 / ms
+    );
     assert!(
         ms < 120_000.0,
         "n=1M should complete in under 2 minutes, took {:.0}ms",

@@ -24,7 +24,9 @@ pub fn boruvka_mst(
         return vec![];
     }
 
-    let core_dists = core_distances.as_slice().expect("core_distances contiguous");
+    let core_dists = core_distances
+        .as_slice()
+        .expect("core_distances contiguous");
     let points: Vec<Vec<f64>> = (0..n).map(|i| data.row(i).to_vec()).collect();
 
     let mut uf = UnionFind::new(n);
@@ -46,9 +48,7 @@ pub fn boruvka_mst(
         // This allows us to set the component's best early and skip
         // interior points.
         let mut point_order: Vec<usize> = (0..n).collect();
-        point_order.sort_unstable_by(|&a, &b| {
-            core_dists[a].partial_cmp(&core_dists[b]).unwrap()
-        });
+        point_order.sort_unstable_by(|&a, &b| core_dists[a].partial_cmp(&core_dists[b]).unwrap());
 
         for &i in &point_order {
             let comp_i = uf.find(i);
@@ -91,7 +91,11 @@ pub fn boruvka_mst(
                     all_same_component = false;
 
                     // Compute mutual reachability distance
-                    let scaled = if alpha != 1.0 { raw_dist / alpha } else { raw_dist };
+                    let scaled = if alpha != 1.0 {
+                        raw_dist / alpha
+                    } else {
+                        raw_dist
+                    };
                     let mr = f64::max(core_i, f64::max(core_dists[j], scaled));
 
                     if mr < best_mr {
@@ -190,15 +194,14 @@ fn brute_force_remaining(
             let ci = uf.find(i);
             let cj = uf.find(j);
             if ci != cj {
-                let raw_dist = crate::distance::euclidean::euclidean_distance(
-                    &data.row(i),
-                    &data.row(j),
-                );
-                let scaled = if alpha != 1.0 { raw_dist / alpha } else { raw_dist };
-                let mr = f64::max(
-                    core_distances[i],
-                    f64::max(core_distances[j], scaled),
-                );
+                let raw_dist =
+                    crate::distance::euclidean::euclidean_distance(&data.row(i), &data.row(j));
+                let scaled = if alpha != 1.0 {
+                    raw_dist / alpha
+                } else {
+                    raw_dist
+                };
+                let mr = f64::max(core_distances[i], f64::max(core_distances[j], scaled));
                 candidate_edges.push(MstEdge {
                     u: i,
                     v: j,
@@ -234,20 +237,10 @@ mod tests {
         let cd = core_distance::compute_core_distances(&data.view(), &Metric::Euclidean, 3);
         let kdtree = KdTree::build(&data.view());
 
-        let boruvka_edges = boruvka_mst(
-            &data.view(),
-            &cd.view(),
-            &kdtree,
-            &Metric::Euclidean,
-            1.0,
-        );
+        let boruvka_edges = boruvka_mst(&data.view(), &cd.view(), &kdtree, &Metric::Euclidean, 1.0);
 
-        let prim_edges = crate::mst::prim::prim_mst(
-            &data.view(),
-            &cd.view(),
-            &Metric::Euclidean,
-            1.0,
-        );
+        let prim_edges =
+            crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
 
         assert_eq!(boruvka_edges.len(), 7);
         assert_eq!(prim_edges.len(), 7);
@@ -274,20 +267,10 @@ mod tests {
         let cd = core_distance::compute_core_distances(&data.view(), &Metric::Euclidean, 5);
         let kdtree = KdTree::build(&data.view());
 
-        let boruvka_edges = boruvka_mst(
-            &data.view(),
-            &cd.view(),
-            &kdtree,
-            &Metric::Euclidean,
-            1.0,
-        );
+        let boruvka_edges = boruvka_mst(&data.view(), &cd.view(), &kdtree, &Metric::Euclidean, 1.0);
 
-        let prim_edges = crate::mst::prim::prim_mst(
-            &data.view(),
-            &cd.view(),
-            &Metric::Euclidean,
-            1.0,
-        );
+        let prim_edges =
+            crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
 
         assert_eq!(boruvka_edges.len(), n - 1);
 

@@ -86,7 +86,10 @@ fn test_min_cluster_size_2() {
     let mut hdbscan = Hdbscan::new(params);
     let labels = hdbscan.fit_predict(&data.view()).unwrap();
     let n_clusters = *labels.iter().max().unwrap() + 1;
-    assert!(n_clusters >= 2, "Expected at least 2 clusters with min_cluster_size=2");
+    assert!(
+        n_clusters >= 2,
+        "Expected at least 2 clusters with min_cluster_size=2"
+    );
 }
 
 #[test]
@@ -158,13 +161,7 @@ fn test_approximate_predict_not_fitted() {
 
 #[test]
 fn test_approximate_predict_dimension_mismatch() {
-    let data = array![
-        [0.0, 0.0],
-        [0.1, 0.0],
-        [0.0, 0.1],
-        [0.1, 0.1],
-        [0.05, 0.05],
-    ];
+    let data = array![[0.0, 0.0], [0.1, 0.0], [0.0, 0.1], [0.1, 0.1], [0.05, 0.05],];
     let params = HdbscanParams {
         min_cluster_size: 2,
         ..Default::default()
@@ -289,6 +286,14 @@ fn test_high_dimensional_data() {
     };
     let mut hdbscan = Hdbscan::new(params);
     let labels = hdbscan.fit_predict(&data.view()).unwrap();
-    let n_clusters = labels.iter().filter(|&&l| l >= 0).collect::<HashSet<_>>().len();
-    assert!(n_clusters >= 2, "Should find at least 2 clusters in high-dim data, got {}", n_clusters);
+    let n_clusters = labels
+        .iter()
+        .filter(|&&l| l >= 0)
+        .collect::<HashSet<_>>()
+        .len();
+    assert!(
+        n_clusters >= 2,
+        "Should find at least 2 clusters in high-dim data, got {}",
+        n_clusters
+    );
 }

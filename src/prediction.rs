@@ -1,7 +1,7 @@
 use crate::distance;
 use crate::error::HdbscanError;
 use crate::params::Metric;
-use ndarray::{ArrayView1, ArrayView2, Array1};
+use ndarray::{Array1, ArrayView1, ArrayView2};
 
 /// Data cached from fitting, needed for approximate prediction.
 pub struct PredictionData {

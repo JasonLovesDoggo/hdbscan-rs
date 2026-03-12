@@ -51,7 +51,10 @@ fn main() {
         min_samples,
     );
     let t1 = Instant::now();
-    println!("  core_distances: {:.2}ms", (t1 - t0).as_secs_f64() * 1000.0);
+    println!(
+        "  core_distances: {:.2}ms",
+        (t1 - t0).as_secs_f64() * 1000.0
+    );
 
     // Step 2: MST (auto-selects Boruvka for large Euclidean datasets)
     let mst_edges = hdbscan_rs::mst::auto_mst(
@@ -66,16 +69,18 @@ fn main() {
     // Step 3: Single linkage
     let single_linkage = hdbscan_rs::linkage::mst_to_single_linkage(&mst_edges, n);
     let t3 = Instant::now();
-    println!("  single_linkage: {:.2}ms", (t3 - t2).as_secs_f64() * 1000.0);
+    println!(
+        "  single_linkage: {:.2}ms",
+        (t3 - t2).as_secs_f64() * 1000.0
+    );
 
     // Step 4: Condensed tree
-    let condensed = hdbscan_rs::condensed_tree::build_condensed_tree(
-        &single_linkage,
-        n,
-        mcs,
-    );
+    let condensed = hdbscan_rs::condensed_tree::build_condensed_tree(&single_linkage, n, mcs);
     let t4 = Instant::now();
-    println!("  condensed_tree: {:.2}ms", (t4 - t3).as_secs_f64() * 1000.0);
+    println!(
+        "  condensed_tree: {:.2}ms",
+        (t4 - t3).as_secs_f64() * 1000.0
+    );
 
     // Step 5: Cluster selection
     let selection = hdbscan_rs::cluster_selection::select_clusters(
@@ -86,16 +91,14 @@ fn main() {
         false,
     );
     let t5 = Instant::now();
-    println!("  cluster_selection: {:.2}ms", (t5 - t4).as_secs_f64() * 1000.0);
+    println!(
+        "  cluster_selection: {:.2}ms",
+        (t5 - t4).as_secs_f64() * 1000.0
+    );
 
     // Step 6: Labels
-    let labels = hdbscan_rs::labels::assign_labels(
-        &condensed,
-        &selection.selected_clusters,
-        n,
-        false,
-        0.0,
-    );
+    let labels =
+        hdbscan_rs::labels::assign_labels(&condensed, &selection.selected_clusters, n, false, 0.0);
     let t6 = Instant::now();
     println!("  labels: {:.2}ms", (t6 - t5).as_secs_f64() * 1000.0);
 
@@ -112,7 +115,10 @@ fn main() {
     // Step 8: Outlier scores
     let _outlier = hdbscan_rs::outlier::compute_outlier_scores(&condensed, n);
     let t8 = Instant::now();
-    println!("  outlier_scores: {:.2}ms", (t8 - t7).as_secs_f64() * 1000.0);
+    println!(
+        "  outlier_scores: {:.2}ms",
+        (t8 - t7).as_secs_f64() * 1000.0
+    );
 
     println!("  TOTAL: {:.2}ms", (t8 - t0).as_secs_f64() * 1000.0);
 }

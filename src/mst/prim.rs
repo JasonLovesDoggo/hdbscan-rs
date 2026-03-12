@@ -46,9 +46,13 @@ fn prim_mst_euclidean_fast(
 
     // Get contiguous data slice for fast access
     let data_contiguous = data.as_standard_layout();
-    let data_slice = data_contiguous.as_slice().expect("data should be contiguous after as_standard_layout");
+    let data_slice = data_contiguous
+        .as_slice()
+        .expect("data should be contiguous after as_standard_layout");
 
-    let core_dists = core_distances.as_slice().expect("core_distances should be contiguous");
+    let core_dists = core_distances
+        .as_slice()
+        .expect("core_distances should be contiguous");
 
     let mut min_weight = vec![f64::INFINITY; n];
     let mut nearest = vec![0usize; n];
@@ -131,9 +135,13 @@ fn prim_mst_euclidean_alpha(
     let dim = data.ncols();
 
     let data_contiguous = data.as_standard_layout();
-    let data_slice = data_contiguous.as_slice().expect("data should be contiguous");
+    let data_slice = data_contiguous
+        .as_slice()
+        .expect("data should be contiguous");
 
-    let core_dists = core_distances.as_slice().expect("core_distances should be contiguous");
+    let core_dists = core_distances
+        .as_slice()
+        .expect("core_distances should be contiguous");
 
     let mut min_weight = vec![f64::INFINITY; n];
     let mut nearest = vec![0usize; n];

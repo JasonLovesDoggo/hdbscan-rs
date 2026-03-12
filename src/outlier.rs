@@ -9,10 +9,7 @@ use std::collections::{HashMap, HashSet};
 /// (or would belong to, for noise points).
 ///
 /// Scores are in [0, 1], where higher = more outlier-like.
-pub fn compute_outlier_scores(
-    condensed_tree: &[CondensedTreeEdge],
-    n_points: usize,
-) -> Vec<f64> {
+pub fn compute_outlier_scores(condensed_tree: &[CondensedTreeEdge], n_points: usize) -> Vec<f64> {
     if condensed_tree.is_empty() {
         return vec![0.0; n_points];
     }
@@ -36,7 +33,10 @@ pub fn compute_outlier_scores(
 
     for edge in condensed_tree {
         if edge.child < n_points {
-            let current = point_lambda.get(&edge.child).copied().unwrap_or(f64::NEG_INFINITY);
+            let current = point_lambda
+                .get(&edge.child)
+                .copied()
+                .unwrap_or(f64::NEG_INFINITY);
             if edge.lambda_val >= current {
                 point_parent.insert(edge.child, edge.parent);
                 point_lambda.insert(edge.child, edge.lambda_val);

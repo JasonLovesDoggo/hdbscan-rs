@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 //! # hdbscan-rs
 //!
 //! A Rust implementation of the HDBSCAN (Hierarchical Density-Based Spatial

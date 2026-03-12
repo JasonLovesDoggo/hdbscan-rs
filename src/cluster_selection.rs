@@ -31,10 +31,7 @@ pub fn select_clusters(
         all_clusters.insert(edge.parent);
         if edge.child >= n_points {
             all_clusters.insert(edge.child);
-            children_of
-                .entry(edge.parent)
-                .or_default()
-                .push(edge.child);
+            children_of.entry(edge.parent).or_default().push(edge.child);
             // A cluster's birth lambda is the lambda at which it splits from its parent
             cluster_birth_lambda
                 .entry(edge.child)
@@ -59,9 +56,14 @@ pub fn select_clusters(
         .collect();
 
     let selected = match method {
-        ClusterSelectionMethod::Eom => {
-            eom_selection(condensed_tree, n_points, &all_clusters, &children_of, &leaf_clusters, allow_single_cluster)
-        }
+        ClusterSelectionMethod::Eom => eom_selection(
+            condensed_tree,
+            n_points,
+            &all_clusters,
+            &children_of,
+            &leaf_clusters,
+            allow_single_cluster,
+        ),
         ClusterSelectionMethod::Leaf => leaf_clusters.clone(),
     };
 
@@ -131,7 +133,11 @@ fn eom_selection(
     let mut node_list: Vec<usize> = if allow_single_cluster {
         all_clusters.iter().copied().collect()
     } else {
-        all_clusters.iter().copied().filter(|&c| c != root).collect()
+        all_clusters
+            .iter()
+            .copied()
+            .filter(|&c| c != root)
+            .collect()
     };
     // Process in reverse topological order (highest ID = deepest first)
     node_list.sort_unstable_by(|a, b| b.cmp(a));
@@ -185,10 +191,7 @@ fn eom_selection(
 }
 
 /// BFS to find all descendants of a node in the cluster tree (excluding the node itself).
-fn bfs_descendants(
-    node: usize,
-    children_of: &HashMap<usize, Vec<usize>>,
-) -> Vec<usize> {
+fn bfs_descendants(node: usize, children_of: &HashMap<usize, Vec<usize>>) -> Vec<usize> {
     let mut result = Vec::new();
     let mut queue = Vec::new();
     if let Some(children) = children_of.get(&node) {
@@ -212,7 +215,11 @@ fn apply_epsilon_merging(
     birth_lambda: &HashMap<usize, f64>,
     epsilon: f64,
 ) -> HashSet<usize> {
-    let epsilon_lambda = if epsilon > 0.0 { 1.0 / epsilon } else { f64::INFINITY };
+    let epsilon_lambda = if epsilon > 0.0 {
+        1.0 / epsilon
+    } else {
+        f64::INFINITY
+    };
     let mut result = selected.clone();
 
     // For each selected cluster, if its birth lambda < epsilon_lambda,

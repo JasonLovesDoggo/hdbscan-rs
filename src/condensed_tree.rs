@@ -88,18 +88,37 @@ pub fn build_condensed_tree(
             (true, true) => {
                 // Real split: both children become new clusters
                 process_big_child(
-                    left, left_size, n_points, current_cluster, parent_lambda,
-                    &mut condensed_id, &mut next_cluster, &mut edges, &mut stack,
+                    left,
+                    left_size,
+                    n_points,
+                    current_cluster,
+                    parent_lambda,
+                    &mut condensed_id,
+                    &mut next_cluster,
+                    &mut edges,
+                    &mut stack,
                 );
                 process_big_child(
-                    right, right_size, n_points, current_cluster, parent_lambda,
-                    &mut condensed_id, &mut next_cluster, &mut edges, &mut stack,
+                    right,
+                    right_size,
+                    n_points,
+                    current_cluster,
+                    parent_lambda,
+                    &mut condensed_id,
+                    &mut next_cluster,
+                    &mut edges,
+                    &mut stack,
                 );
             }
             (true, false) => {
                 // Right is too small: emit its points at their actual lambda
                 emit_fallout_subtree(
-                    &hierarchy, right, n_points, current_cluster, parent_lambda, &mut edges,
+                    &hierarchy,
+                    right,
+                    n_points,
+                    current_cluster,
+                    parent_lambda,
+                    &mut edges,
                 );
                 // Left continues as current_cluster (collapse)
                 if left >= n_points {
@@ -109,7 +128,12 @@ pub fn build_condensed_tree(
             }
             (false, true) => {
                 emit_fallout_subtree(
-                    &hierarchy, left, n_points, current_cluster, parent_lambda, &mut edges,
+                    &hierarchy,
+                    left,
+                    n_points,
+                    current_cluster,
+                    parent_lambda,
+                    &mut edges,
                 );
                 if right >= n_points {
                     condensed_id[right - n_points] = current_cluster;
@@ -118,10 +142,20 @@ pub fn build_condensed_tree(
             }
             (false, false) => {
                 emit_fallout_subtree(
-                    &hierarchy, left, n_points, current_cluster, parent_lambda, &mut edges,
+                    &hierarchy,
+                    left,
+                    n_points,
+                    current_cluster,
+                    parent_lambda,
+                    &mut edges,
                 );
                 emit_fallout_subtree(
-                    &hierarchy, right, n_points, current_cluster, parent_lambda, &mut edges,
+                    &hierarchy,
+                    right,
+                    n_points,
+                    current_cluster,
+                    parent_lambda,
+                    &mut edges,
                 );
             }
         }
@@ -201,8 +235,22 @@ fn emit_fallout_subtree(
         // the node where they appear, which is the max of the path lambdas.
         let h = &hierarchy[node - n_points];
         let child_lambda = f64::max(fallout_lambda, h.lambda);
-        emit_fallout_subtree(hierarchy, h.left_child, n_points, parent_cluster, child_lambda, edges);
-        emit_fallout_subtree(hierarchy, h.right_child, n_points, parent_cluster, child_lambda, edges);
+        emit_fallout_subtree(
+            hierarchy,
+            h.left_child,
+            n_points,
+            parent_cluster,
+            child_lambda,
+            edges,
+        );
+        emit_fallout_subtree(
+            hierarchy,
+            h.right_child,
+            n_points,
+            parent_cluster,
+            child_lambda,
+            edges,
+        );
     }
 }
 
@@ -214,11 +262,36 @@ mod tests {
     #[test]
     fn test_condensed_tree_basic() {
         let merges = vec![
-            SingleLinkageMerge { left: 0, right: 1, distance: 1.0, size: 2 },
-            SingleLinkageMerge { left: 2, right: 3, distance: 1.0, size: 2 },
-            SingleLinkageMerge { left: 4, right: 5, distance: 1.0, size: 2 },
-            SingleLinkageMerge { left: 0, right: 2, distance: 5.0, size: 4 },
-            SingleLinkageMerge { left: 0, right: 4, distance: 10.0, size: 6 },
+            SingleLinkageMerge {
+                left: 0,
+                right: 1,
+                distance: 1.0,
+                size: 2,
+            },
+            SingleLinkageMerge {
+                left: 2,
+                right: 3,
+                distance: 1.0,
+                size: 2,
+            },
+            SingleLinkageMerge {
+                left: 4,
+                right: 5,
+                distance: 1.0,
+                size: 2,
+            },
+            SingleLinkageMerge {
+                left: 0,
+                right: 2,
+                distance: 5.0,
+                size: 4,
+            },
+            SingleLinkageMerge {
+                left: 0,
+                right: 4,
+                distance: 10.0,
+                size: 6,
+            },
         ];
         let edges = build_condensed_tree(&merges, 6, 2);
         assert!(!edges.is_empty());
@@ -239,10 +312,30 @@ mod tests {
         //   0-2 at dist=3 (lambda=0.333)
         //   {0,1,2}-{3,4} at dist=10 (lambda=0.1)
         let merges = vec![
-            SingleLinkageMerge { left: 0, right: 1, distance: 1.0, size: 2 },
-            SingleLinkageMerge { left: 3, right: 4, distance: 2.0, size: 2 },
-            SingleLinkageMerge { left: 0, right: 2, distance: 3.0, size: 3 },
-            SingleLinkageMerge { left: 0, right: 3, distance: 10.0, size: 5 },
+            SingleLinkageMerge {
+                left: 0,
+                right: 1,
+                distance: 1.0,
+                size: 2,
+            },
+            SingleLinkageMerge {
+                left: 3,
+                right: 4,
+                distance: 2.0,
+                size: 2,
+            },
+            SingleLinkageMerge {
+                left: 0,
+                right: 2,
+                distance: 3.0,
+                size: 3,
+            },
+            SingleLinkageMerge {
+                left: 0,
+                right: 3,
+                distance: 10.0,
+                size: 5,
+            },
         ];
         let edges = build_condensed_tree(&merges, 5, 3);
 

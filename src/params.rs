@@ -1,8 +1,9 @@
 use crate::error::HdbscanError;
 
 /// Distance metric for HDBSCAN.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum Metric {
+    #[default]
     Euclidean,
     Manhattan,
     Cosine,
@@ -10,25 +11,14 @@ pub enum Metric {
     Precomputed,
 }
 
-impl Default for Metric {
-    fn default() -> Self {
-        Metric::Euclidean
-    }
-}
-
 /// Cluster selection method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ClusterSelectionMethod {
     /// Excess of Mass (default in sklearn)
+    #[default]
     Eom,
     /// Leaf clusters
     Leaf,
-}
-
-impl Default for ClusterSelectionMethod {
-    fn default() -> Self {
-        ClusterSelectionMethod::Eom
-    }
 }
 
 /// What centers to store after fitting.
