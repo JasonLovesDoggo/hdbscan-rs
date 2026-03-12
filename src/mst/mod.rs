@@ -25,10 +25,11 @@ pub fn dual_tree_threshold(dim: usize) -> usize {
     if dim <= 4 {
         1500
     } else if dim <= 16 {
-        // kd-tree region: Prim's competitive up to ~6K; above that, Boruvka + shared tree wins
-        6000
+        // kd-tree region: Boruvka + shared tree wins above this threshold
+        4000
     } else if dim <= 64 {
-        // Medium dims: Prim's O(n^2) still competitive at moderate n.
+        // Medium dims: Prim's O(n^2) still competitive; ball tree pruning
+        // degrades at high dims so we need large n for the tree to win.
         8000
     } else {
         // High dims (LLM embeddings): Prim's O(n^2 * d) is expensive.

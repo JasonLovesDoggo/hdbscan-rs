@@ -1,5 +1,5 @@
 /// A single edge in the minimum spanning tree.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MstEdge {
     pub u: usize,
@@ -8,7 +8,7 @@ pub struct MstEdge {
 }
 
 /// A single merge step in the single-linkage dendrogram.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SingleLinkageMerge {
     pub left: usize,
@@ -18,7 +18,7 @@ pub struct SingleLinkageMerge {
 }
 
 /// An edge in the condensed tree.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CondensedTreeEdge {
     pub parent: usize,

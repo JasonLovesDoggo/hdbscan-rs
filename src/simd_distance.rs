@@ -70,10 +70,13 @@ pub fn squared_euclidean_simd(a: &[f64], b: &[f64]) -> f64 {
 /// Squared Euclidean distance between two points in a flat data array.
 #[inline(always)]
 pub fn squared_euclidean_flat(data: &[f64], i: usize, j: usize, dim: usize) -> f64 {
-    let a = &data[i * dim..(i + 1) * dim];
-    let b = &data[j * dim..(j + 1) * dim];
+    let off_i = i * dim;
+    let off_j = j * dim;
+    let a = unsafe { data.get_unchecked(off_i..off_i + dim) };
+    let b = unsafe { data.get_unchecked(off_j..off_j + dim) };
     squared_euclidean_simd(a, b)
 }
+
 
 #[cfg(test)]
 mod tests {

@@ -207,10 +207,8 @@ fn process_big_child(
 
 /// Emit point-level fallout edges for a subtree that is too small to be a cluster.
 ///
-/// Unlike the naive approach of emitting all points at the parent's lambda,
-/// this walks the subtree and emits each point at the lambda of the internal
-/// hierarchy node where that point is located. This matches sklearn's behavior
-/// where `_bfs_from_hierarchy` traverses the subtree preserving internal lambdas.
+/// Uses an explicit stack instead of recursion for better cache behavior
+/// and to avoid stack overflow on deep hierarchies.
 fn emit_fallout_subtree(
     hierarchy: &[HierarchyNode],
     node: usize,
@@ -219,38 +217,23 @@ fn emit_fallout_subtree(
     fallout_lambda: f64,
     edges: &mut Vec<CondensedTreeEdge>,
 ) {
-    if node < n_points {
-        // Single point: falls out at the fallout_lambda
-        edges.push(CondensedTreeEdge {
-            parent: parent_cluster,
-            child: node,
-            lambda_val: fallout_lambda,
-            child_size: 1,
-        });
-    } else {
-        // Internal hierarchy node within the small subtree.
-        // This node split at its own lambda. Both children
-        // fall out into the parent cluster at max(fallout_lambda, node.lambda).
-        // sklearn behavior: each sub-node's points fall out at the lambda of
-        // the node where they appear, which is the max of the path lambdas.
-        let h = &hierarchy[node - n_points];
-        let child_lambda = f64::max(fallout_lambda, h.lambda);
-        emit_fallout_subtree(
-            hierarchy,
-            h.left_child,
-            n_points,
-            parent_cluster,
-            child_lambda,
-            edges,
-        );
-        emit_fallout_subtree(
-            hierarchy,
-            h.right_child,
-            n_points,
-            parent_cluster,
-            child_lambda,
-            edges,
-        );
+    // Stack entries: (node, lambda)
+    let mut stack = vec![(node, fallout_lambda)];
+
+    while let Some((current, lambda)) = stack.pop() {
+        if current < n_points {
+            edges.push(CondensedTreeEdge {
+                parent: parent_cluster,
+                child: current,
+                lambda_val: lambda,
+                child_size: 1,
+            });
+        } else {
+            let h = &hierarchy[current - n_points];
+            let child_lambda = f64::max(lambda, h.lambda);
+            stack.push((h.right_child, child_lambda));
+            stack.push((h.left_child, child_lambda));
+        }
     }
 }
 

@@ -11,11 +11,9 @@ pub fn mst_to_single_linkage(edges: &[MstEdge], n_points: usize) -> Vec<SingleLi
         return vec![];
     }
 
-    // Sort edges by weight, breaking ties by min(u,v) then max(u,v) for determinism
-    let mut sorted_indices: Vec<usize> = (0..edges.len()).collect();
-    sorted_indices.sort_by(|&a, &b| {
-        let ea = &edges[a];
-        let eb = &edges[b];
+    // Sort edges directly for cache-friendly access (avoids indirection through index array)
+    let mut sorted_edges: Vec<MstEdge> = edges.to_vec();
+    sorted_edges.sort_unstable_by(|ea, eb| {
         OrderedFloat(ea.weight)
             .cmp(&OrderedFloat(eb.weight))
             .then_with(|| ea.u.min(ea.v).cmp(&eb.u.min(eb.v)))
@@ -27,18 +25,17 @@ pub fn mst_to_single_linkage(edges: &[MstEdge], n_points: usize) -> Vec<SingleLi
 
     // Process edges in batches of equal weight (tied edge handling)
     let mut i = 0;
-    while i < sorted_indices.len() {
-        let current_weight = edges[sorted_indices[i]].weight;
+    while i < sorted_edges.len() {
+        let current_weight = sorted_edges[i].weight;
         let batch_start = i;
 
         // Find end of batch with same weight
-        while i < sorted_indices.len() && edges[sorted_indices[i]].weight == current_weight {
+        while i < sorted_edges.len() && sorted_edges[i].weight == current_weight {
             i += 1;
         }
 
         // Process all edges in this batch
-        for &idx in &sorted_indices[batch_start..i] {
-            let edge = &edges[idx];
+        for edge in &sorted_edges[batch_start..i] {
             let root_u = uf.find(edge.u);
             let root_v = uf.find(edge.v);
 

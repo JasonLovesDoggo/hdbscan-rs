@@ -28,38 +28,38 @@ GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_compar
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 500x2D | 4.3 ms | 6.8 ms | **1.1 ms** | 3.9x | 6.2x | 1.00 |
-| 1Kx2D | 9.6 ms | 13.2 ms | **3.5 ms** | 2.7x | 3.8x | 1.00 |
-| 2Kx2D | 27.2 ms | 28.7 ms | **6.3 ms** | 4.3x | 4.6x | 1.00 |
-| 5Kx2D | 171 ms | 133 ms | **22 ms** | 7.8x | 6.0x | 1.00 |
-| 10Kx2D | 469 ms | 179 ms | **48 ms** | 9.8x | 3.7x | 1.00 |
-| 50Kx2D | 13,099 ms | 1,092 ms | **239 ms** | 54.8x | 4.6x | 1.00 |
+| 500x2D | 4.6 ms | 6.3 ms | **1.6 ms** | 2.9x | 4.0x | 1.00 |
+| 1Kx2D | 9.1 ms | 13.9 ms | **4.2 ms** | 2.2x | 3.3x | 1.00 |
+| 2Kx2D | 24.9 ms | 28.5 ms | **5.1 ms** | 4.9x | 5.6x | 1.00 |
+| 5Kx2D | 127 ms | 80.7 ms | **16.2 ms** | 7.8x | 5.0x | 1.00 |
+| 10Kx2D | 462 ms | 179 ms | **34.6 ms** | 13.4x | 5.2x | 1.00 |
+| 50Kx2D | 12,828 ms | 1,029 ms | **183 ms** | 70.0x | 5.6x | 1.00 |
 
 ### Medium-dimensional
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 5Kx10D | 264 ms | 144 ms | **134 ms** | 2.0x | 1.1x | 1.00 |
-| 5Kx50D | 941 ms | 405 ms | **379 ms** | 2.5x | 1.1x | 1.00 |
+| 5Kx10D | 242 ms | 154 ms | **121 ms** | 2.0x | 1.3x | 1.00 |
+| 5Kx50D | 934 ms | 390 ms | 495 ms | 1.9x | 0.8x | 1.00 |
 
 ### High-dimensional (LLM embeddings)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 2Kx256D | 943 ms | 863 ms | **245 ms** | 3.8x | 3.5x | 1.00 |
-| 1Kx256D | 241 ms | 232 ms | **66 ms** | 3.7x | 3.5x | 1.00 |
-| 500x1536D | 421 ms | 448 ms | **147 ms** | 2.9x | 3.0x | 1.00 |
+| 2Kx256D | 918 ms | 855 ms | **274 ms** | 3.3x | 3.1x | 1.00 |
+| 1Kx256D | 236 ms | 228 ms | **76 ms** | 3.1x | 3.0x | 1.00 |
+| 500x1536D | 418 ms | 442 ms | **153 ms** | 2.7x | 2.9x | 1.00 |
 
 ### Peak memory (RSS)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs |
 |--------|--------:|----------:|-----------:|
-| 500x2D | 129 MB | 129 MB | **2 MB** |
-| 10Kx2D | 138 MB | 138 MB | **6 MB** |
-| 50Kx2D | 161 MB | 178 MB | **21 MB** |
-| 5Kx50D | 178 MB | 178 MB | **16 MB** |
-| 2Kx256D | 178 MB | 178 MB | **28 MB** |
-| 500x1536D | 178 MB | 178 MB | **42 MB** |
+| 500x2D | 129 MB | 129 MB | **3 MB** |
+| 10Kx2D | 136 MB | 137 MB | **6 MB** |
+| 50Kx2D | 161 MB | 179 MB | **20 MB** |
+| 5Kx50D | 179 MB | 179 MB | **16 MB** |
+| 2Kx256D | 179 MB | 179 MB | **31 MB** |
+| 500x1536D | 179 MB | 179 MB | **41 MB** |
 
 Python-based implementations carry ~128 MB baseline from the interpreter + NumPy + sklearn. Rust runs as a standalone binary with no runtime overhead.
 
@@ -69,7 +69,7 @@ The crate picks the MST strategy automatically based on the metric, dataset size
 
 | Condition | Algorithm | Complexity |
 |-----------|-----------|------------|
-| Euclidean, dim <= 16, n > 6,000 | Dual-tree Boruvka (kd-tree) | O(n log^2 n) |
+| Euclidean, dim <= 16, n > 4,000 | Dual-tree Boruvka (kd-tree) | O(n log^2 n) |
 | Euclidean, dim > 16, n > threshold | Dual-tree Boruvka (ball tree) | O(n log^2 n) |
 | Small n or non-Euclidean | Prim's | O(n^2) |
 
@@ -84,6 +84,9 @@ Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-5
 - **Shared tree construction** -- single ball/kd-tree shared between core distances and MST when both use tree-based algorithms
 - **kNN-seeded Boruvka** -- nearest neighbor indices from core distance computation seed initial component bounds
 - **Fully squared-distance Prim's** -- all comparisons in squared MR space, sqrt only at edge creation; precomputed core² for fast pruning
+- **Unsafe-indexed distance** -- bounds-check-free flat array access in hot distance loops
+- **Copy-derive structs** -- MstEdge, SingleLinkageMerge, CondensedTreeEdge are Copy for zero-overhead value semantics
+- **Iterative condensed tree** -- stack-based fallout subtree emission avoids recursion overhead
 - **Cache-friendly active set** -- periodic sorting of active node indices for sequential memory access
 - **Per-node component caching** -- bottom-up labeling for O(1) same-component subtree pruning
 - **Closer-child-first traversal** -- tighter bounds earlier for better pruning on the second child
