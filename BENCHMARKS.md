@@ -1,9 +1,10 @@
 # Benchmarks
 
-Head-to-head comparison against the two major HDBSCAN implementations:
+Head-to-head comparison against the three major HDBSCAN implementations:
 
 - **sklearn** (`sklearn.cluster.HDBSCAN`) -- scikit-learn 1.6.1, Cython + NumPy
 - **C-hdbscan** (`hdbscan` package) -- scikit-learn-contrib, Cython + ball tree Boruvka
+- **fast-hdbscan** (`fast_hdbscan`) -- Numba JIT-compiled, optimized for speed
 
 All benchmarks are best-of-3 wall time. Data is `make_blobs` with 5 Gaussian centers, `min_cluster_size=10`, default parameters. Each run includes the full pipeline (core distances, MST, condensed tree, cluster selection, labels + probabilities + outlier scores).
 
@@ -26,42 +27,42 @@ GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_compar
 
 ### Low-dimensional (2D blobs)
 
-| Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
-|--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 500x2D | 4.1 ms | 6.2 ms | **1.3 ms** | 3.1x | 4.7x | 1.00 |
-| 1Kx2D | 8.9 ms | 12.7 ms | **2.6 ms** | 3.4x | 4.9x | 1.00 |
-| 2Kx2D | 24.6 ms | 27.3 ms | **4.8 ms** | 5.1x | 5.6x | 1.00 |
-| 5Kx2D | 128 ms | 80.2 ms | **10.6 ms** | 12.1x | 7.6x | 1.00 |
-| 10Kx2D | 455 ms | 189 ms | **18.4 ms** | 24.7x | 10.3x | 1.00 |
-| 50Kx2D | 12,812 ms | 1,024 ms | **124 ms** | 103x | 8.2x | 1.00 |
+| Config |   sklearn | C-hdbscan | fast-hdbscan |  hdbscan-rs | vs sklearn |  vs C | vs fast |  ARI |
+| ------ | --------: | --------: | -----------: | ----------: | ---------: | ----: | ------: | ---: |
+| 500x2D |    4.1 ms |    6.2 ms |       2.0 ms |  **1.3 ms** |       3.1x |  4.7x |    1.5x | 1.00 |
+| 1Kx2D  |    8.9 ms |   12.7 ms |       3.7 ms |  **2.6 ms** |       3.4x |  4.9x |    1.4x | 1.00 |
+| 2Kx2D  |   24.6 ms |   27.3 ms |       6.5 ms |  **4.8 ms** |       5.1x |  5.6x |    1.4x | 1.00 |
+| 5Kx2D  |    128 ms |   80.2 ms |      24.5 ms | **10.6 ms** |      12.1x |  7.6x |    2.3x | 1.00 |
+| 10Kx2D |    455 ms |    189 ms |      43.3 ms | **18.4 ms** |      24.7x | 10.3x |    2.4x | 1.00 |
+| 50Kx2D | 12,812 ms |  1,024 ms |       293 ms |  **124 ms** |       103x |  8.2x |    2.4x | 1.00 |
 
 ### Medium-dimensional
 
-| Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
-|--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 5Kx10D | 241 ms | 136 ms | **62 ms** | 3.9x | 2.2x | 1.00 |
-| 5Kx50D | 924 ms | 379 ms | **272 ms** | 3.4x | 1.4x | 1.00 |
+| Config | sklearn | C-hdbscan | fast-hdbscan | hdbscan-rs | vs sklearn | vs C | vs fast |  ARI |
+| ------ | ------: | --------: | -----------: | ---------: | ---------: | ---: | ------: | ---: |
+| 5Kx10D |  241 ms |    136 ms |      72.7 ms |  **62 ms** |       3.9x | 2.2x |    1.2x | 1.00 |
+| 5Kx50D |  924 ms |    379 ms |       319 ms | **272 ms** |       3.4x | 1.4x |    1.2x | 1.00 |
 
 ### High-dimensional (LLM embeddings)
 
-| Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
-|--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 2Kx256D | 926 ms | 858 ms | **78 ms** | 11.9x | 11.0x | 1.00 |
-| 1Kx256D | 246 ms | 230 ms | **19 ms** | 12.6x | 11.8x | 1.00 |
-| 500x1536D | 424 ms | 444 ms | **28 ms** | 14.9x | 15.7x | 1.00 |
+| Config    | sklearn | C-hdbscan | fast-hdbscan | hdbscan-rs | vs sklearn |  vs C | vs fast |  ARI |
+| --------- | ------: | --------: | -----------: | ---------: | ---------: | ----: | ------: | ---: |
+| 2Kx256D   |  926 ms |    858 ms |       180 ms |  **78 ms** |      11.9x | 11.0x |    2.3x | 1.00 |
+| 1Kx256D   |  246 ms |    230 ms |      49.0 ms |  **19 ms** |      12.6x | 11.8x |    2.6x | 1.00 |
+| 500x1536D |  424 ms |    444 ms |      87.7 ms |  **28 ms** |      14.9x | 15.7x |    3.1x | 1.00 |
 
 ### Peak memory (RSS)
 
-| Config | sklearn | C-hdbscan | hdbscan-rs |
-|--------|--------:|----------:|-----------:|
-| 500x2D | 128 MB | 129 MB | **3 MB** |
-| 10Kx2D | 136 MB | 137 MB | **7 MB** |
-| 50Kx2D | 161 MB | 178 MB | **26 MB** |
-| 5Kx50D | 178 MB | 178 MB | 207 MB |
-| 2Kx256D | 178 MB | 178 MB | 56 MB |
-| 500x1536D | 178 MB | 178 MB | 41 MB |
+| Config    | sklearn | C-hdbscan | fast-hdbscan | hdbscan-rs |
+| --------- | ------: | --------: | -----------: | ---------: |
+| 500x2D    |  128 MB |    129 MB |       468 MB |   **3 MB** |
+| 10Kx2D    |  136 MB |    137 MB |       470 MB |   **7 MB** |
+| 50Kx2D    |  161 MB |    178 MB |       479 MB |  **26 MB** |
+| 5Kx50D    |  178 MB |    178 MB |       479 MB |     207 MB |
+| 2Kx256D   |  178 MB |    178 MB |       482 MB |  **56 MB** |
+| 500x1536D |  178 MB |    178 MB |       486 MB |  **41 MB** |
 
-Python-based implementations carry ~128 MB baseline from the interpreter + NumPy + sklearn. Rust runs as a standalone binary with no runtime overhead.
+Python-based implementations carry ~128 MB baseline from the interpreter + NumPy + sklearn. fast-hdbscan adds ~340 MB from Numba JIT compilation. Rust runs as a standalone binary with no runtime overhead.
 
 Note: the 5Kx50D, 2Kx256D, and 500x1536D configs use a fused GEMM+Prim's approach that caches the Gram matrix (X@X.T) in memory. This trades memory for speed by computing all pairwise dot products via cache-blocked matrix multiply, then deriving distances as needed. The fused path is automatically selected for Euclidean metric with dim > 16.
 
@@ -71,13 +72,13 @@ WASM build: `--profile wasm-release` (`opt-level = "s"`, `panic = "abort"`, `str
 
 Single-threaded (WASM has no `std::thread`), same machine.
 
-| Config | Native | WASM | Slowdown |
-|--------|-------:|-----:|---------:|
-| 5Kx10D | 92.8 ms | 207.6 ms | 2.2x |
-| 5Kx50D | 260.6 ms | 572.6 ms | 2.2x |
-| 50Kx2D | 122.2 ms | 212.3 ms | 1.7x |
-| 1Kx256D | 19.1 ms | 78.0 ms | 4.1x |
-| 10Kx10D | 192.7 ms | 765.1 ms | 4.0x |
+| Config  |   Native |     WASM | Slowdown |
+| ------- | -------: | -------: | -------: |
+| 5Kx10D  |  92.8 ms | 207.6 ms |     2.2x |
+| 5Kx50D  | 260.6 ms | 572.6 ms |     2.2x |
+| 50Kx2D  | 122.2 ms | 212.3 ms |     1.7x |
+| 1Kx256D |  19.1 ms |  78.0 ms |     4.1x |
+| 10Kx10D | 192.7 ms | 765.1 ms |     4.0x |
 
 The 1.7–2.2x slowdown is from missing SIMD auto-vectorization. The 4x configs (10Kx10D, 1Kx256D) lose the multi-threaded kNN/Boruvka parallelism that native gets.
 
@@ -87,13 +88,13 @@ Reproducible via `tests/bench_wasm_vs_native.sh`.
 
 The crate picks the MST strategy automatically based on the metric, dataset size, and dimensionality:
 
-| Condition | Algorithm | Complexity |
-|-----------|-----------|------------|
-| Euclidean, dim <= 4, n > 500 | Dual-tree Boruvka (kd-tree) | O(n log^2 n) |
-| Euclidean, dim 5-16, n > 4,000 | Dual-tree Boruvka (kd-tree) | O(n log^2 n) |
-| Euclidean, dim > 16, n > threshold | Dual-tree Boruvka (ball tree) | O(n log^2 n) |
-| Euclidean, dim > 16, small n | Fused GEMM+Prim's (cached Gram matrix) | O(n^2) |
-| Small n or non-Euclidean | Prim's | O(n^2) |
+| Condition                          | Algorithm                              | Complexity   |
+| ---------------------------------- | -------------------------------------- | ------------ |
+| Euclidean, dim <= 4, n > 500       | Dual-tree Boruvka (kd-tree)            | O(n log^2 n) |
+| Euclidean, dim 5-16, n > 4,000     | Dual-tree Boruvka (kd-tree)            | O(n log^2 n) |
+| Euclidean, dim > 16, n > threshold | Dual-tree Boruvka (ball tree)          | O(n log^2 n) |
+| Euclidean, dim > 16, small n       | Fused GEMM+Prim's (cached Gram matrix) | O(n^2)       |
+| Small n or non-Euclidean           | Prim's                                 | O(n^2)       |
 
 Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-512, brute force SIMD for dim > 512, and precomputed/generic for non-Euclidean metrics.
 

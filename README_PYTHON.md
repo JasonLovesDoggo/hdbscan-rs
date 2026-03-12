@@ -87,17 +87,17 @@ HDBSCAN(
 
 Best-of-3 wall time on a 4-core AMD EPYC. Data is `make_blobs` with 5 centers, `min_cluster_size=10`. Numbers are from the native Rust core; the Python binding adds <5ms overhead for data conversion.
 
-| Config | sklearn HDBSCAN | hdbscan (C) | hdbscan-rs | vs sklearn | vs C |
-|--------|----------------:|------------:|-----------:|-----------:|-----:|
-| 1Kx2D | 8.9 ms | 12.7 ms | **2.6 ms** | 3.4x | 4.9x |
-| 5Kx2D | 128 ms | 80.2 ms | **10.6 ms** | 12.1x | 7.6x |
-| 10Kx2D | 455 ms | 189 ms | **18.4 ms** | 24.7x | 10.3x |
-| 50Kx2D | 12,812 ms | 1,024 ms | **124 ms** | 103x | 8.2x |
-| 5Kx10D | 241 ms | 136 ms | **62 ms** | 3.9x | 2.2x |
-| 1Kx256D | 246 ms | 230 ms | **19 ms** | 12.6x | 11.8x |
-| 500x1536D | 424 ms | 444 ms | **28 ms** | 14.9x | 15.7x |
+| Config    |   sklearn | C-hdbscan | fast-hdbscan |  hdbscan-rs | vs sklearn | vs fast |
+| --------- | --------: | --------: | -----------: | ----------: | ---------: | ------: |
+| 1Kx2D     |    8.9 ms |   12.7 ms |       3.7 ms |  **2.6 ms** |       3.4x |    1.4x |
+| 5Kx2D     |    128 ms |   80.2 ms |      24.5 ms | **10.6 ms** |      12.1x |    2.3x |
+| 10Kx2D    |    455 ms |    189 ms |      43.3 ms | **18.4 ms** |      24.7x |    2.4x |
+| 50Kx2D    | 12,812 ms |  1,024 ms |       293 ms |  **124 ms** |       103x |    2.4x |
+| 5Kx10D    |    241 ms |    136 ms |      72.7 ms |   **62 ms** |       3.9x |    1.2x |
+| 1Kx256D   |    246 ms |    230 ms |        49 ms |   **19 ms** |      12.6x |    2.6x |
+| 500x1536D |    424 ms |    444 ms |      87.7 ms |   **28 ms** |      14.9x |    3.1x |
 
-Memory usage is 5-60x lower than Python-based implementations.
+Memory: 3-56 MB (Rust) vs 128-178 MB (sklearn/C) vs 468-486 MB (fast-hdbscan + Numba JIT).
 
 ## Precomputed distances
 
