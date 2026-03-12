@@ -6,34 +6,63 @@ pub use boruvka::boruvka_mst;
 pub use dual_tree_boruvka::dual_tree_boruvka_mst;
 pub use prim::prim_mst;
 
+use crate::ball_tree::BallTree;
 use crate::kdtree_bounded::BoundedKdTree;
 use crate::params::Metric;
 use crate::types::MstEdge;
 use ndarray::{ArrayView1, ArrayView2};
 
-/// Threshold above which dual-tree Boruvka is used for Euclidean metric.
-/// Below this, optimized Prim's with on-the-fly distances is faster due
-/// to lower constant factors.
-const DUAL_TREE_THRESHOLD: usize = 1500;
+/// Maximum dimensionality for kd-tree Boruvka. Above this, ball tree is used.
+const KDTREE_MAX_DIM: usize = 16;
+
+/// Select the best MST algorithm based on n, dimensionality, and metric.
+///
+/// The crossover point between O(n^2) Prim's and O(n log n) tree-based Boruvka
+/// depends on dimensionality: tree pruning degrades in higher dims, so we need
+/// more points before the tree approach wins. Empirically tuned on real
+/// sklearn-like blob data (Gaussian clusters with overlapping tails).
+pub fn dual_tree_threshold(dim: usize) -> usize {
+    if dim <= 4 {
+        1500
+    } else if dim <= 16 {
+        // kd-tree region: Prim's competitive up to ~6K; above that, Boruvka + shared tree wins
+        6000
+    } else if dim <= 64 {
+        // Medium dims: Prim's O(n^2) still competitive at moderate n.
+        8000
+    } else {
+        // High dims (LLM embeddings): Prim's O(n^2 * d) is expensive.
+        // Ball tree Boruvka at large n.
+        2000
+    }
+}
 
 /// Build MST on the mutual reachability graph, automatically selecting
-/// the best algorithm based on dataset size and metric.
+/// the best algorithm based on dataset size, dimensionality, and metric.
 ///
-/// - Euclidean with n > DUAL_TREE_THRESHOLD: Dual-tree Boruvka (O(n log n))
-/// - Otherwise: Prim's with on-the-fly distances (O(n²) with pruning)
+/// - Euclidean, low dim, large n: Dual-tree Boruvka with kd-tree
+/// - Euclidean, high dim, large n: Dual-tree Boruvka with ball tree
+/// - Small n or non-Euclidean: Prim's O(n^2)
 pub fn auto_mst(
     data: &ArrayView2<f64>,
     core_distances: &ArrayView1<f64>,
     metric: &Metric,
     alpha: f64,
+    nn_indices: Option<&[usize]>,
 ) -> Vec<MstEdge> {
     let n = data.nrows();
+    let dim = data.ncols();
+    let threshold = dual_tree_threshold(dim);
 
     match metric {
-        Metric::Euclidean if n > DUAL_TREE_THRESHOLD => {
+        Metric::Euclidean if n > threshold && dim <= KDTREE_MAX_DIM => {
             let tree = BoundedKdTree::build(data);
-            dual_tree_boruvka_mst(&tree, core_distances, alpha)
+            dual_tree_boruvka_mst(&tree, core_distances, alpha, nn_indices)
         }
-        _ => prim_mst(data, core_distances, metric, alpha),
+        Metric::Euclidean if n > threshold => {
+            let tree = BallTree::build(data);
+            dual_tree_boruvka_mst(&tree, core_distances, alpha, nn_indices)
+        }
+        _ => prim::prim_mst_seeded(data, core_distances, metric, alpha, nn_indices),
     }
 }

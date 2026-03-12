@@ -187,14 +187,7 @@ impl BoundedKdTree {
     /// Compute squared Euclidean distance between two points.
     #[inline]
     pub fn dist_sq(&self, i: usize, j: usize) -> f64 {
-        let base_i = i * self.dim;
-        let base_j = j * self.dim;
-        let mut sum = 0.0f64;
-        for d in 0..self.dim {
-            let diff = self.data[base_i + d] - self.data[base_j + d];
-            sum += diff * diff;
-        }
-        sum
+        crate::simd_distance::squared_euclidean_flat(&self.data, i, j, self.dim)
     }
 
     /// Get the point indices for a node's subtree.
@@ -202,6 +195,65 @@ impl BoundedKdTree {
     pub fn node_points(&self, node_idx: usize) -> &[usize] {
         let node = &self.nodes[node_idx];
         &self.sorted_indices[node.idx_start..node.idx_end]
+    }
+
+    /// Find k nearest neighbors of query point.
+    /// Returns (distance, index) sorted by distance.
+    pub fn query_knn(&self, query: &[f64], k: usize) -> Vec<(f64, usize)> {
+        if self.nodes.is_empty() || k == 0 {
+            return vec![];
+        }
+        let mut heap = crate::knn_heap::KnnHeap::new(k);
+        self.knn_recursive(0, query, &mut heap);
+        heap.into_sorted_distances()
+    }
+
+    fn knn_recursive(&self, node_idx: usize, query: &[f64], heap: &mut crate::knn_heap::KnnHeap) {
+        let node = &self.nodes[node_idx];
+
+        // Pruning: min distance from query to bounding box
+        let mut min_dist_sq = 0.0f64;
+        for d in 0..self.dim {
+            if query[d] < node.bbox_min[d] {
+                let diff = node.bbox_min[d] - query[d];
+                min_dist_sq += diff * diff;
+            } else if query[d] > node.bbox_max[d] {
+                let diff = query[d] - node.bbox_max[d];
+                min_dist_sq += diff * diff;
+            }
+        }
+        if heap.is_full() && min_dist_sq >= heap.max_dist_sq() {
+            return;
+        }
+
+        if node.is_leaf {
+            for &idx in &self.sorted_indices[node.idx_start..node.idx_end] {
+                let dist_sq = crate::simd_distance::squared_euclidean_simd(
+                    query,
+                    &self.data[idx * self.dim..(idx + 1) * self.dim],
+                );
+                heap.push(dist_sq, idx);
+            }
+        } else {
+            // Visit closer child first
+            let split_diff = query[node.split_dim] - node.split_val;
+            let (first, second) = if split_diff <= 0.0 {
+                (node.left, node.right)
+            } else {
+                (node.right, node.left)
+            };
+
+            if first != NO_CHILD {
+                self.knn_recursive(first, query, heap);
+            }
+            if second != NO_CHILD {
+                // Only visit far side if splitting plane distance could beat current k-th best
+                let plane_dist_sq = split_diff * split_diff;
+                if !heap.is_full() || plane_dist_sq < heap.max_dist_sq() {
+                    self.knn_recursive(second, query, heap);
+                }
+            }
+        }
     }
 }
 

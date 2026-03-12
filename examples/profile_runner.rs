@@ -62,6 +62,7 @@ fn main() {
         &core_distances.view(),
         &Metric::Euclidean,
         1.0,
+        None,
     );
     let t2 = Instant::now();
     println!("  prim_mst: {:.2}ms", (t2 - t1).as_secs_f64() * 1000.0);

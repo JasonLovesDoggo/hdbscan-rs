@@ -64,19 +64,10 @@ impl Hdbscan {
             });
         }
 
-        // Step 1: Compute core distances
-        let core_distances =
-            core_distance::compute_core_distances(data, &self.params.metric, min_samples);
-
-        // Step 2: Build MST on mutual reachability graph
-        // Automatically selects Boruvka (O(n log² n)) for large Euclidean datasets,
-        // Prim's (O(n²)) otherwise.
-        let mst_edges = mst::auto_mst(
-            data,
-            &core_distances.view(),
-            &self.params.metric,
-            self.params.alpha,
-        );
+        // Step 1+2: Compute core distances and build MST.
+        // For Euclidean with dim > 16, the ball tree is shared between core distances
+        // and MST to avoid building it twice.
+        let (core_distances, mst_edges) = self.compute_core_and_mst(data, min_samples);
 
         // Step 3: Build single-linkage tree
         let single_linkage = linkage::mst_to_single_linkage(&mst_edges, n_points);
@@ -198,6 +189,44 @@ impl Hdbscan {
     /// Get cluster medoids (None if not fitted or not requested).
     pub fn medoids(&self) -> Option<&Array2<f64>> {
         self.medoids_.as_ref()
+    }
+
+    /// Compute core distances and MST, sharing tree construction where possible.
+    fn compute_core_and_mst(
+        &self,
+        data: &ArrayView2<f64>,
+        min_samples: usize,
+    ) -> (ndarray::Array1<f64>, Vec<crate::types::MstEdge>) {
+        use crate::ball_tree::BallTree;
+
+        let n = data.nrows();
+        let dim = data.ncols();
+        let threshold = mst::dual_tree_threshold(dim);
+
+        if matches!(self.params.metric, Metric::Euclidean) && n > threshold && dim > 16 {
+            // Share ball tree between core distances and Boruvka MST
+            let tree = BallTree::build(data);
+            let (core_distances, nn_indices) =
+                core_distance::compute_core_distances_with_balltree(&tree, data, min_samples);
+            let mst_edges = mst::dual_tree_boruvka::dual_tree_boruvka_mst(
+                &tree,
+                &core_distances.view(),
+                self.params.alpha,
+                Some(&nn_indices),
+            );
+            (core_distances, mst_edges)
+        } else {
+            let (core_distances, nn_indices) =
+                core_distance::compute_core_distances_with_nn(data, &self.params.metric, min_samples);
+            let mst_edges = mst::auto_mst(
+                data,
+                &core_distances.view(),
+                &self.params.metric,
+                self.params.alpha,
+                Some(&nn_indices),
+            );
+            (core_distances, mst_edges)
+        }
     }
 
     fn validate_data(&self, data: &ArrayView2<f64>) -> Result<(), HdbscanError> {

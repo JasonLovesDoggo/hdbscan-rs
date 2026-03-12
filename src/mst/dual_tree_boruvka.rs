@@ -1,8 +1,11 @@
 //! Dual-tree Boruvka MST for Euclidean mutual reachability distance.
 //!
-//! Achieves O(n log n) expected time by traversing pairs of KD-tree nodes
+//! Achieves O(n log n) expected time by traversing pairs of spatial tree nodes
 //! and pruning entire subtree pairs when no cross-component edge can improve
 //! the current best.
+//!
+//! Generic over tree type: works with both BoundedKdTree (low dimensions)
+//! and BallTree (medium-to-high dimensions).
 //!
 //! Key optimizations:
 //! - Per-node component caching for O(1) same-component pruning
@@ -11,7 +14,7 @@
 //! - Closer-child-first traversal for tighter bounds earlier
 //! - Core distance shortcut: skip points whose core distance exceeds component best
 
-use crate::kdtree_bounded::{BoundedKdTree, NO_CHILD};
+use crate::spatial_tree::{SpatialNode, SpatialTree};
 use crate::types::MstEdge;
 use crate::union_find::UnionFind;
 use ndarray::ArrayView1;
@@ -25,12 +28,14 @@ struct ComponentBest {
 }
 
 /// Build MST using dual-tree Boruvka algorithm.
-pub fn dual_tree_boruvka_mst(
-    tree: &BoundedKdTree,
+/// Generic over any SpatialTree implementation.
+pub fn dual_tree_boruvka_mst<T: SpatialTree>(
+    tree: &T,
     core_distances: &ArrayView1<f64>,
     alpha: f64,
+    nn_indices: Option<&[usize]>,
 ) -> Vec<MstEdge> {
-    let n = tree.n;
+    let n = tree.n();
     if n <= 1 {
         return vec![];
     }
@@ -52,12 +57,46 @@ pub fn dual_tree_boruvka_mst(
         n
     ];
 
+    // Seed initial bounds from kNN nearest neighbors (computed during core distance).
+    // This gives the first Boruvka round much tighter bounds for pruning.
+    if let Some(nn) = nn_indices {
+        for i in 0..n {
+            let j = nn[i];
+            if j == i {
+                continue;
+            }
+            let core_max = f64::max(core_dists[i], core_dists[j]);
+            let d_sq = tree.dist_sq(i, j);
+            let mr = if alpha == 1.0 && d_sq <= core_max * core_max {
+                core_max
+            } else {
+                let dist = d_sq.sqrt();
+                let scaled = if alpha != 1.0 { dist / alpha } else { dist };
+                f64::max(core_max, scaled)
+            };
+            if mr < component_best[i].mr_dist {
+                component_best[i] = ComponentBest {
+                    mr_dist: mr,
+                    from: i,
+                    to: j,
+                };
+            }
+            if mr < component_best[j].mr_dist {
+                component_best[j] = ComponentBest {
+                    mr_dist: mr,
+                    from: j,
+                    to: i,
+                };
+            }
+        }
+    }
+
     // Precompute minimum core distance per tree node (static, computed once)
-    let mut node_min_core = vec![f64::INFINITY; tree.nodes.len()];
+    let mut node_min_core = vec![f64::INFINITY; tree.nodes().len()];
     precompute_min_core(tree, 0, core_dists, &mut node_min_core);
 
     // Per-node component cache (recomputed each round)
-    let mut node_component = vec![usize::MAX; tree.nodes.len()];
+    let mut node_component = vec![usize::MAX; tree.nodes().len()];
 
     // Per-point component cache (avoids repeated uf.find() during traversal)
     let mut point_component = vec![0usize; n];
@@ -76,8 +115,8 @@ pub fn dual_tree_boruvka_mst(
         // Compute per-node component labels for O(1) same-component pruning
         compute_node_components_cached(tree, 0, &point_component, &mut node_component);
 
-        // Dual-tree traversal from root × root
-        if !tree.nodes.is_empty() {
+        // Dual-tree traversal from root x root
+        if !tree.nodes().is_empty() {
             dual_tree_search(
                 tree,
                 0,
@@ -136,21 +175,23 @@ pub fn dual_tree_boruvka_mst(
     edges
 }
 
-fn precompute_min_core(
-    tree: &BoundedKdTree,
+fn precompute_min_core<T: SpatialTree>(
+    tree: &T,
     node_idx: usize,
     core_dists: &[f64],
     node_min_core: &mut [f64],
 ) {
-    if node_idx == NO_CHILD {
+    let nodes = tree.nodes();
+    if node_idx >= nodes.len() {
         return;
     }
 
-    let node = &tree.nodes[node_idx];
+    let node = &nodes[node_idx];
 
-    if node.is_leaf {
+    if node.is_leaf() {
         let mut min_core = f64::INFINITY;
-        for &idx in &tree.sorted_indices[node.idx_start..node.idx_end] {
+        let sorted = tree.sorted_indices();
+        for &idx in &sorted[node.idx_start()..node.idx_end()] {
             if core_dists[idx] < min_core {
                 min_core = core_dists[idx];
             }
@@ -158,13 +199,15 @@ fn precompute_min_core(
         node_min_core[node_idx] = min_core;
     } else {
         let mut min_core = f64::INFINITY;
-        if node.left != NO_CHILD {
-            precompute_min_core(tree, node.left, core_dists, node_min_core);
-            min_core = f64::min(min_core, node_min_core[node.left]);
+        let left = node.left();
+        let right = node.right();
+        if left < nodes.len() {
+            precompute_min_core(tree, left, core_dists, node_min_core);
+            min_core = f64::min(min_core, node_min_core[left]);
         }
-        if node.right != NO_CHILD {
-            precompute_min_core(tree, node.right, core_dists, node_min_core);
-            min_core = f64::min(min_core, node_min_core[node.right]);
+        if right < nodes.len() {
+            precompute_min_core(tree, right, core_dists, node_min_core);
+            min_core = f64::min(min_core, node_min_core[right]);
         }
         node_min_core[node_idx] = min_core;
     }
@@ -173,34 +216,38 @@ fn precompute_min_core(
 /// Compute per-node component labels using cached point components.
 /// If all points in a node share the same component, store that component ID.
 /// Otherwise store usize::MAX (mixed).
-fn compute_node_components_cached(
-    tree: &BoundedKdTree,
+fn compute_node_components_cached<T: SpatialTree>(
+    tree: &T,
     node_idx: usize,
     point_component: &[usize],
     node_component: &mut [usize],
 ) -> usize {
-    if node_idx == NO_CHILD {
+    let nodes = tree.nodes();
+    if node_idx >= nodes.len() {
         return usize::MAX;
     }
 
-    let node = &tree.nodes[node_idx];
+    let node = &nodes[node_idx];
+    let sorted = tree.sorted_indices();
 
-    if node.is_leaf {
-        let first = point_component[tree.sorted_indices[node.idx_start]];
-        let all_same = tree.sorted_indices[node.idx_start..node.idx_end]
+    if node.is_leaf() {
+        let first = point_component[sorted[node.idx_start()]];
+        let all_same = sorted[node.idx_start()..node.idx_end()]
             .iter()
             .all(|&idx| point_component[idx] == first);
         let comp = if all_same { first } else { usize::MAX };
         node_component[node_idx] = comp;
         comp
     } else {
-        let left_comp = if node.left != NO_CHILD {
-            compute_node_components_cached(tree, node.left, point_component, node_component)
+        let left = node.left();
+        let right = node.right();
+        let left_comp = if left < nodes.len() {
+            compute_node_components_cached(tree, left, point_component, node_component)
         } else {
             usize::MAX
         };
-        let right_comp = if node.right != NO_CHILD {
-            compute_node_components_cached(tree, node.right, point_component, node_component)
+        let right_comp = if right < nodes.len() {
+            compute_node_components_cached(tree, right, point_component, node_component)
         } else {
             usize::MAX
         };
@@ -217,8 +264,8 @@ fn compute_node_components_cached(
 
 /// Core dual-tree traversal with per-component tracking.
 #[allow(clippy::too_many_arguments)]
-fn dual_tree_search(
-    tree: &BoundedKdTree,
+fn dual_tree_search<T: SpatialTree>(
+    tree: &T,
     query_node: usize,
     ref_node: usize,
     core_dists: &[f64],
@@ -228,7 +275,8 @@ fn dual_tree_search(
     node_component: &[usize],
     alpha: f64,
 ) {
-    if query_node == NO_CHILD || ref_node == NO_CHILD {
+    let nodes = tree.nodes();
+    if query_node >= nodes.len() || ref_node >= nodes.len() {
         return;
     }
 
@@ -254,9 +302,10 @@ fn dual_tree_search(
     );
 
     // Check if this lower bound can improve ANY component in the query node.
-    let q_node = &tree.nodes[query_node];
+    let q_node = &nodes[query_node];
+    let sorted = tree.sorted_indices();
     let mut can_prune = true;
-    for &idx in &tree.sorted_indices[q_node.idx_start..q_node.idx_end] {
+    for &idx in &sorted[q_node.idx_start()..q_node.idx_end()] {
         let comp = point_component[idx];
         if mr_lower < component_best[comp].mr_dist {
             can_prune = false;
@@ -267,12 +316,12 @@ fn dual_tree_search(
         return;
     }
 
-    let r_node = &tree.nodes[ref_node];
+    let r_node = &nodes[ref_node];
 
     // === Base case: both leaves ===
-    if q_node.is_leaf && r_node.is_leaf {
-        let q_points = &tree.sorted_indices[q_node.idx_start..q_node.idx_end];
-        let r_points = &tree.sorted_indices[r_node.idx_start..r_node.idx_end];
+    if q_node.is_leaf() && r_node.is_leaf() {
+        let q_points = &sorted[q_node.idx_start()..q_node.idx_end()];
+        let r_points = &sorted[r_node.idx_start()..r_node.idx_end()];
 
         for &qi in q_points {
             let comp_q = point_component[qi];
@@ -323,11 +372,11 @@ fn dual_tree_search(
 
     // === Recursive case ===
     // Split the larger node. Visit closer child first for better pruning.
-    if q_node.is_leaf || (!r_node.is_leaf && r_node.count > q_node.count) {
+    if q_node.is_leaf() || (!r_node.is_leaf() && r_node.count() > q_node.count()) {
         // Split the reference node
         let (first, second) = closer_child_first(tree, query_node, ref_node);
 
-        if first != NO_CHILD {
+        if first < nodes.len() {
             dual_tree_search(
                 tree,
                 query_node,
@@ -340,7 +389,7 @@ fn dual_tree_search(
                 alpha,
             );
         }
-        if second != NO_CHILD {
+        if second < nodes.len() {
             dual_tree_search(
                 tree,
                 query_node,
@@ -355,10 +404,12 @@ fn dual_tree_search(
         }
     } else {
         // Split the query node
-        if q_node.left != NO_CHILD {
+        let q_left = q_node.left();
+        let q_right = q_node.right();
+        if q_left < nodes.len() {
             dual_tree_search(
                 tree,
-                q_node.left,
+                q_left,
                 ref_node,
                 core_dists,
                 node_min_core,
@@ -368,10 +419,10 @@ fn dual_tree_search(
                 alpha,
             );
         }
-        if q_node.right != NO_CHILD {
+        if q_right < nodes.len() {
             dual_tree_search(
                 tree,
-                q_node.right,
+                q_right,
                 ref_node,
                 core_dists,
                 node_min_core,
@@ -385,30 +436,40 @@ fn dual_tree_search(
 }
 
 /// Determine which child of ref_node is closer to query_node, return (closer, farther).
-fn closer_child_first(tree: &BoundedKdTree, query_node: usize, ref_node: usize) -> (usize, usize) {
-    let r = &tree.nodes[ref_node];
-    let dist_left = if r.left != NO_CHILD {
-        tree.min_dist_sq_node_to_node(query_node, r.left)
+fn closer_child_first<T: SpatialTree>(
+    tree: &T,
+    query_node: usize,
+    ref_node: usize,
+) -> (usize, usize) {
+    let r = &tree.nodes()[ref_node];
+    let r_left = r.left();
+    let r_right = r.right();
+    let nodes = tree.nodes();
+
+    let dist_left = if r_left < nodes.len() {
+        tree.min_dist_sq_node_to_node(query_node, r_left)
     } else {
         f64::INFINITY
     };
-    let dist_right = if r.right != NO_CHILD {
-        tree.min_dist_sq_node_to_node(query_node, r.right)
+    let dist_right = if r_right < nodes.len() {
+        tree.min_dist_sq_node_to_node(query_node, r_right)
     } else {
         f64::INFINITY
     };
 
     if dist_left <= dist_right {
-        (r.left, r.right)
+        (r_left, r_right)
     } else {
-        (r.right, r.left)
+        (r_right, r_left)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ball_tree::BallTree;
     use crate::core_distance;
+    use crate::kdtree_bounded::BoundedKdTree;
     use crate::params::Metric;
     use ndarray::array;
 
@@ -428,7 +489,7 @@ mod tests {
         let cd = core_distance::compute_core_distances(&data.view(), &Metric::Euclidean, 3);
         let tree = BoundedKdTree::build(&data.view());
 
-        let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0);
+        let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0, None);
         let prim_edges =
             crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
 
@@ -463,7 +524,7 @@ mod tests {
         let cd = core_distance::compute_core_distances(&data.view(), &Metric::Euclidean, 5);
         let tree = BoundedKdTree::build(&data.view());
 
-        let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0);
+        let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0, None);
         let prim_edges =
             crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
 
@@ -474,6 +535,110 @@ mod tests {
         assert!(
             (dtb_total - prim_total).abs() < 1e-6,
             "Weight mismatch: dual_tree={:.6} prim={:.6}",
+            dtb_total,
+            prim_total,
+        );
+    }
+
+    #[test]
+    fn test_ball_tree_boruvka_simple() {
+        let data = array![
+            [0.0, 0.0],
+            [0.1, 0.0],
+            [0.0, 0.1],
+            [0.1, 0.1],
+            [10.0, 10.0],
+            [10.1, 10.0],
+            [10.0, 10.1],
+            [10.1, 10.1],
+        ];
+
+        let cd = core_distance::compute_core_distances(&data.view(), &Metric::Euclidean, 3);
+        let tree = BallTree::build(&data.view());
+
+        let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0, None);
+        let prim_edges =
+            crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
+
+        assert_eq!(dtb_edges.len(), 7);
+
+        let dtb_total: f64 = dtb_edges.iter().map(|e| e.weight).sum();
+        let prim_total: f64 = prim_edges.iter().map(|e| e.weight).sum();
+        assert!(
+            (dtb_total - prim_total).abs() < 1e-10,
+            "Ball tree weight mismatch: dual_tree={} prim={}",
+            dtb_total,
+            prim_total,
+        );
+    }
+
+    #[test]
+    fn test_ball_tree_boruvka_200pts() {
+        let n = 200;
+        let mut data = ndarray::Array2::zeros((n, 2));
+        for i in 0..n {
+            let cluster = i / 50;
+            let cx = (cluster % 2) as f64 * 20.0;
+            let cy = (cluster / 2) as f64 * 20.0;
+            let seed = (i as u64).wrapping_mul(6364136223846793005).wrapping_add(1);
+            let offset_x = ((seed >> 33) as f64 / (1u64 << 31) as f64 - 0.5) * 2.0;
+            let seed2 = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let offset_y = ((seed2 >> 33) as f64 / (1u64 << 31) as f64 - 0.5) * 2.0;
+            data[[i, 0]] = cx + offset_x;
+            data[[i, 1]] = cy + offset_y;
+        }
+
+        let cd = core_distance::compute_core_distances(&data.view(), &Metric::Euclidean, 5);
+        let ball_tree = BallTree::build(&data.view());
+        let kd_tree = BoundedKdTree::build(&data.view());
+
+        let ball_edges = dual_tree_boruvka_mst(&ball_tree, &cd.view(), 1.0, None);
+        let kd_edges = dual_tree_boruvka_mst(&kd_tree, &cd.view(), 1.0, None);
+
+        assert_eq!(ball_edges.len(), n - 1);
+
+        let ball_total: f64 = ball_edges.iter().map(|e| e.weight).sum();
+        let kd_total: f64 = kd_edges.iter().map(|e| e.weight).sum();
+        assert!(
+            (ball_total - kd_total).abs() < 1e-6,
+            "Ball vs KD weight mismatch: ball={:.6} kd={:.6}",
+            ball_total,
+            kd_total,
+        );
+    }
+
+    #[test]
+    fn test_ball_tree_boruvka_high_dim() {
+        // Test in 50D to verify ball tree works in higher dimensions
+        let n = 200;
+        let dim = 50;
+        let mut data = ndarray::Array2::zeros((n, dim));
+        for i in 0..n {
+            let cluster = i / 50;
+            for d in 0..dim {
+                let center = (cluster as f64) * 20.0;
+                let seed = ((i * dim + d) as u64)
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1);
+                let offset = ((seed >> 33) as f64 / (1u64 << 31) as f64 - 0.5) * 2.0;
+                data[[i, d]] = center + offset;
+            }
+        }
+
+        let cd = core_distance::compute_core_distances(&data.view(), &Metric::Euclidean, 5);
+        let tree = BallTree::build(&data.view());
+
+        let dtb_edges = dual_tree_boruvka_mst(&tree, &cd.view(), 1.0, None);
+        let prim_edges =
+            crate::mst::prim::prim_mst(&data.view(), &cd.view(), &Metric::Euclidean, 1.0);
+
+        assert_eq!(dtb_edges.len(), n - 1);
+
+        let dtb_total: f64 = dtb_edges.iter().map(|e| e.weight).sum();
+        let prim_total: f64 = prim_edges.iter().map(|e| e.weight).sum();
+        assert!(
+            (dtb_total - prim_total).abs() < 1e-4,
+            "50D ball tree weight mismatch: dual_tree={:.6} prim={:.6}",
             dtb_total,
             prim_total,
         );

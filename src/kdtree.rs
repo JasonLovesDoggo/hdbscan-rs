@@ -114,25 +114,18 @@ impl KdTree {
     }
 
     /// Find the k nearest neighbors of a query point.
-    /// Returns pairs of (squared_distance, point_index), sorted by distance.
+    /// Returns pairs of (distance, point_index), sorted by distance.
     pub fn query_knn(&self, query: &[f64], k: usize) -> Vec<(f64, usize)> {
         if self.nodes.is_empty() || k == 0 {
             return vec![];
         }
 
-        let mut heap = BoundedMaxHeap::new(k);
+        let mut heap = crate::knn_heap::KnnHeap::new(k);
         self.knn_recursive(0, query, &mut heap);
-
-        let mut result: Vec<(f64, usize)> = heap
-            .items
-            .into_iter()
-            .map(|(dist_sq, idx)| (dist_sq.sqrt(), idx))
-            .collect();
-        result.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        result
+        heap.into_sorted_distances()
     }
 
-    fn knn_recursive(&self, node_idx: usize, query: &[f64], heap: &mut BoundedMaxHeap) {
+    fn knn_recursive(&self, node_idx: usize, query: &[f64], heap: &mut crate::knn_heap::KnnHeap) {
         if node_idx == NO_CHILD {
             return;
         }
@@ -140,7 +133,6 @@ impl KdTree {
         let node = &self.nodes[node_idx];
         let point = &self.data[node.point_idx];
 
-        // Compute squared distance to this point
         let dist_sq: f64 = query
             .iter()
             .zip(point.iter())
@@ -152,7 +144,6 @@ impl KdTree {
 
         heap.push(dist_sq, node.point_idx);
 
-        // Decide which child to visit first
         let diff = query[node.split_dim] - node.split_val;
         let (first, second) = if diff <= 0.0 {
             (node.left, node.right)
@@ -162,9 +153,8 @@ impl KdTree {
 
         self.knn_recursive(first, query, heap);
 
-        // Only visit the other subtree if the splitting plane is closer than the worst neighbor
         let plane_dist_sq = diff * diff;
-        if heap.len() < heap.capacity || plane_dist_sq < heap.max_dist() {
+        if !heap.is_full() || plane_dist_sq < heap.max_dist_sq() {
             self.knn_recursive(second, query, heap);
         }
     }
@@ -177,16 +167,14 @@ impl KdTree {
         }
 
         let query = &self.data[idx];
-        let mut heap = BoundedMaxHeap::new(k + 1);
+        let mut heap = crate::knn_heap::KnnHeap::new(k + 1);
         self.knn_recursive(0, query, &mut heap);
 
         let mut result: Vec<(f64, usize)> = heap
-            .items
+            .into_sorted_distances()
             .into_iter()
             .filter(|&(_, pidx)| pidx != idx)
-            .map(|(dist_sq, pidx)| (dist_sq.sqrt(), pidx))
             .collect();
-        result.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         result.truncate(k);
         result
     }
@@ -197,43 +185,6 @@ impl KdTree {
 
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
-    }
-}
-
-/// Max-heap bounded to k items, keeping the k smallest distances.
-struct BoundedMaxHeap {
-    items: Vec<(f64, usize)>, // (squared_distance, index)
-    capacity: usize,
-}
-
-impl BoundedMaxHeap {
-    fn new(capacity: usize) -> Self {
-        BoundedMaxHeap {
-            items: Vec::with_capacity(capacity + 1),
-            capacity,
-        }
-    }
-
-    fn push(&mut self, dist_sq: f64, idx: usize) {
-        if self.items.len() < self.capacity {
-            self.items.push((dist_sq, idx));
-            if self.items.len() == self.capacity {
-                // Heapify to find max quickly
-                self.items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-            }
-        } else if dist_sq < self.items[0].0 {
-            self.items[0] = (dist_sq, idx);
-            // Re-sort to maintain max at front
-            self.items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        }
-    }
-
-    fn max_dist(&self) -> f64 {
-        self.items.first().map_or(f64::INFINITY, |&(d, _)| d)
-    }
-
-    fn len(&self) -> usize {
-        self.items.len()
     }
 }
 

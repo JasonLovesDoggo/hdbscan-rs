@@ -37,19 +37,22 @@ let labels = hdbscan.fit_predict(&data.view()).unwrap();
 
 ## Performance
 
-Measured on 2D blobs (5 clusters, `min_cluster_size=10`), single thread, best-of-N:
+Single-thread, best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Compared against sklearn HDBSCAN (Cython) and C-hdbscan (Cython + ball tree Boruvka). Data is `make_blobs`, `min_cluster_size=10`.
 
-| n       | Time      |
-|---------|-----------|
-| 500     | 1.8 ms    |
-| 1,000   | 5.0 ms    |
-| 2,000   | 7.9 ms    |
-| 5,000   | 24.1 ms   |
-| 10,000  | 54.5 ms   |
-| 20,000  | 114.4 ms  |
-| 50,000  | 290.2 ms  |
+| Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan |
+|--------|--------:|----------:|-----------:|-----------:|-------------:|
+| 1Kx2D | 9.6 ms | 13.2 ms | **3.9 ms** | 2.5x | 3.4x |
+| 5Kx2D | 171 ms | 133 ms | **26 ms** | 6.6x | 5.1x |
+| 10Kx2D | 469 ms | 179 ms | **55 ms** | 8.5x | 3.3x |
+| 50Kx2D | 13,099 ms | 1,092 ms | **300 ms** | 43.7x | 3.6x |
+| 5Kx10D | 264 ms | 144 ms | **143 ms** | 1.8x | 1.0x |
+| 5Kx50D | 941 ms | 405 ms | **400 ms** | 2.4x | 1.0x |
+| 1Kx256D | 241 ms | 232 ms | **72 ms** | 3.3x | 3.2x |
+| 500x1536D | 421 ms | 448 ms | **150 ms** | 2.8x | 3.0x |
 
-The MST algorithm is selected automatically: dual-tree Boruvka for Euclidean data with n >= 128, Prim's otherwise. See [BENCHMARKS.md](BENCHMARKS.md) for methodology and detailed results.
+Memory usage is **5-60x lower** than Python implementations (no interpreter/NumPy overhead).
+
+See [BENCHMARKS.md](BENCHMARKS.md) for full results, machine specs, methodology, and analysis.
 
 ## Parameters
 

@@ -22,6 +22,7 @@
 //! let labels = hdbscan.fit_predict(&data.view()).unwrap();
 //! ```
 
+pub mod ball_tree;
 pub mod centers;
 pub mod cluster_selection;
 pub mod condensed_tree;
@@ -31,6 +32,7 @@ pub mod error;
 pub mod hdbscan;
 pub mod kdtree;
 pub mod kdtree_bounded;
+pub mod knn_heap;
 pub mod labels;
 pub mod linkage;
 pub mod membership;
@@ -39,6 +41,8 @@ pub mod outlier;
 pub mod params;
 pub mod prediction;
 pub mod types;
+pub mod simd_distance;
+pub mod spatial_tree;
 pub mod union_find;
 
 #[cfg(feature = "python")]

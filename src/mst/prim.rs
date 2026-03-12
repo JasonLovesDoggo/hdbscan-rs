@@ -17,13 +17,23 @@ pub fn prim_mst(
     metric: &Metric,
     alpha: f64,
 ) -> Vec<MstEdge> {
+    prim_mst_seeded(data, core_distances, metric, alpha, None)
+}
+
+pub fn prim_mst_seeded(
+    data: &ArrayView2<f64>,
+    core_distances: &ArrayView1<f64>,
+    metric: &Metric,
+    alpha: f64,
+    nn_indices: Option<&[usize]>,
+) -> Vec<MstEdge> {
     let n = data.nrows();
     if n <= 1 {
         return vec![];
     }
 
     match metric {
-        Metric::Euclidean if alpha == 1.0 => prim_mst_euclidean_fast(data, core_distances),
+        Metric::Euclidean if alpha == 1.0 => prim_mst_euclidean_fast(data, core_distances, nn_indices),
         Metric::Euclidean => prim_mst_euclidean_alpha(data, core_distances, alpha),
         _ => prim_mst_generic(data, core_distances, metric, alpha),
     }
@@ -40,6 +50,7 @@ pub fn prim_mst(
 fn prim_mst_euclidean_fast(
     data: &ArrayView2<f64>,
     core_distances: &ArrayView1<f64>,
+    _nn_indices: Option<&[usize]>,
 ) -> Vec<MstEdge> {
     let n = data.nrows();
     let dim = data.ncols();
@@ -54,7 +65,11 @@ fn prim_mst_euclidean_fast(
         .as_slice()
         .expect("core_distances should be contiguous");
 
+    // Precompute squared core distances for fast comparisons
+    let core_dists_sq: Vec<f64> = core_dists.iter().map(|&d| d * d).collect();
+
     let mut min_weight = vec![f64::INFINITY; n];
+    let mut min_weight_sq = vec![f64::INFINITY; n];
     let mut nearest = vec![0usize; n];
     let mut edges = Vec::with_capacity(n - 1);
 
@@ -63,9 +78,21 @@ fn prim_mst_euclidean_fast(
 
     // Initialize from node 0
     let core_0 = core_dists[0];
+    let core_0_sq = core_dists_sq[0];
     for &j in &active {
-        let d = squared_euclidean(data_slice, 0, j, dim).sqrt();
-        min_weight[j] = f64::max(core_0, f64::max(core_dists[j], d));
+        let d_sq = squared_euclidean(data_slice, 0, j, dim);
+        // MR = max(core_0, core_j, dist). Work in squared space where possible.
+        let core_max_sq = f64::max(core_0_sq, core_dists_sq[j]);
+        if d_sq <= core_max_sq {
+            // dist <= core_max, so MR = core_max
+            let mr = f64::max(core_0, core_dists[j]);
+            min_weight[j] = mr;
+            min_weight_sq[j] = core_max_sq;
+        } else {
+            let mr = d_sq.sqrt();
+            min_weight[j] = mr;
+            min_weight_sq[j] = d_sq;
+        }
         nearest[j] = 0;
     }
 
@@ -98,27 +125,40 @@ fn prim_mst_euclidean_fast(
         // Remove from active set (swap-remove is O(1))
         active.swap_remove(best_pos);
 
+        // Periodically sort active set for cache-friendly data access
+        if active.len() > 64 && active.len() % 128 == 0 {
+            active.sort_unstable();
+        }
+
         // Update min weights from the newly added node.
-        // Key optimization: skip distance computation when core distances
-        // already dominate (MR distance can't improve).
         let core_i = core_dists[min_idx];
+        let core_i_sq = core_dists_sq[min_idx];
         for &j in &active {
-            let core_max = f64::max(core_i, core_dists[j]);
-            // If the core distance floor already exceeds current best, skip
-            if core_max >= min_weight[j] {
+            // Fast check: if core_i >= min_weight[j], this can't improve
+            // (since MR >= core_i for any edge from min_idx)
+            if core_i_sq >= min_weight_sq[j] {
+                continue;
+            }
+            // Also check core_j
+            if core_dists_sq[j] >= min_weight_sq[j] {
                 continue;
             }
             let d_sq = squared_euclidean(data_slice, min_idx, j, dim);
-            // Avoid sqrt when core distances dominate
-            let mr = if d_sq <= core_max * core_max {
-                core_max
-            } else {
-                d_sq.sqrt()
-            };
-            if mr < min_weight[j] {
-                min_weight[j] = mr;
-                nearest[j] = min_idx;
+            if d_sq >= min_weight_sq[j] {
+                continue;
             }
+            // MR = max(core_max, dist)
+            let core_max_sq = f64::max(core_i_sq, core_dists_sq[j]);
+            if d_sq <= core_max_sq {
+                let mr = f64::max(core_i, core_dists[j]);
+                min_weight[j] = mr;
+                min_weight_sq[j] = core_max_sq;
+            } else {
+                let mr = d_sq.sqrt();
+                min_weight[j] = mr;
+                min_weight_sq[j] = d_sq;
+            }
+            nearest[j] = min_idx;
         }
     }
 
@@ -199,14 +239,7 @@ fn prim_mst_euclidean_alpha(
 /// Compute squared Euclidean distance between points i and j using raw slice access.
 #[inline(always)]
 fn squared_euclidean(data: &[f64], i: usize, j: usize, dim: usize) -> f64 {
-    let a = &data[i * dim..(i + 1) * dim];
-    let b = &data[j * dim..(j + 1) * dim];
-    let mut sum = 0.0f64;
-    for k in 0..dim {
-        let d = a[k] - b[k];
-        sum += d * d;
-    }
-    sum
+    crate::simd_distance::squared_euclidean_flat(data, i, j, dim)
 }
 
 /// Generic Prim's MST for non-Euclidean metrics. Precomputes the full matrix.

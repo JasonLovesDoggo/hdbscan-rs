@@ -4,6 +4,18 @@ use std::env;
 use std::fs;
 use std::time::Instant;
 
+/// Read peak RSS from /proc/self/status (Linux).
+fn peak_rss_kb() -> Option<u64> {
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if line.starts_with("VmHWM:") {
+            let val = line.split_whitespace().nth(1)?;
+            return val.parse().ok();
+        }
+    }
+    None
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -55,6 +67,7 @@ fn main() {
     }
 
     println!("elapsed_ms:{:.2}", best_ms);
+    println!("peak_rss_kb:{}", peak_rss_kb().unwrap_or(0));
     let label_str: Vec<String> = labels.iter().map(|l| l.to_string()).collect();
     println!("labels:{}", label_str.join(","));
 }
