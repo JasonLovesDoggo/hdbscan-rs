@@ -112,7 +112,7 @@ impl BallTree {
 
         // Compute centroid into the SoA buffer
         let centroid_start = centroids_buf.len();
-        centroids_buf.extend(std::iter::repeat(0.0f64).take(dim));
+        centroids_buf.extend(std::iter::repeat_n(0.0f64, dim));
         let centroid = &mut centroids_buf[centroid_start..centroid_start + dim];
 
         for &idx in &indices[start..end] {

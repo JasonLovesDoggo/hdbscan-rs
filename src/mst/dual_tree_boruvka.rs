@@ -350,7 +350,7 @@ fn compute_node_components_cached<T: SpatialTree>(
 }
 
 /// Core dual-tree traversal with per-component tracking.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn dual_tree_search<T: SpatialTree>(
     tree: &T,
     query_node: usize,

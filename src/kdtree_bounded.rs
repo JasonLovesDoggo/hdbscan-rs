@@ -118,6 +118,7 @@ impl BoundedKdTree {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_recursive(
         data: &[f64],
         indices: &mut [usize],
@@ -136,8 +137,8 @@ impl BoundedKdTree {
 
         // Compute bounding box into temporary storage
         let bb_start = bbox_min_buf.len();
-        bbox_min_buf.extend(std::iter::repeat(f64::INFINITY).take(dim));
-        bbox_max_buf.extend(std::iter::repeat(f64::NEG_INFINITY).take(dim));
+        bbox_min_buf.extend(std::iter::repeat_n(f64::INFINITY, dim));
+        bbox_max_buf.extend(std::iter::repeat_n(f64::NEG_INFINITY, dim));
 
         let bb_min = &mut bbox_min_buf[bb_start..bb_start + dim];
         let bb_max = &mut bbox_max_buf[bb_start..bb_start + dim];

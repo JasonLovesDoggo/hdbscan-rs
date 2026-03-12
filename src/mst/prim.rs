@@ -116,7 +116,7 @@ fn prim_mst_euclidean_fast(
         active.swap_remove(best_pos);
 
         // Periodically sort active set for cache-friendly data access
-        if active.len() > 64 && active.len() % 128 == 0 {
+        if active.len() > 64 && active.len().is_multiple_of(128) {
             active.sort_unstable();
         }
 
@@ -271,7 +271,7 @@ fn fused_phase1_gemm(
 
     // Extract core distances using a single reusable kNN heap per row.
     // Sequential row access is cache-friendly for the Gram matrix.
-    let heap_k = if k > 1 { k - 1 } else { 0 };
+    let heap_k = k.saturating_sub(1);
     let mut core_dists_sq = vec![0.0f64; n];
 
     if heap_k > 0 {
@@ -308,7 +308,7 @@ fn fused_phase1_gemm(
                 }
             }
         } else {
-            let chunk_size = (n + n_threads - 1) / n_threads;
+            let chunk_size = n.div_ceil(n_threads);
             let norms_ref: &[f64] = &norms_sq;
             let gram_ref: &[f64] = gram_slice;
 
@@ -389,7 +389,7 @@ fn fused_phase1_simd(
 
     // Build gram matrix (dot products) and kNN heaps simultaneously
     let mut gram = vec![0.0f64; n * n];
-    let heap_k = if k > 1 { k - 1 } else { 0 };
+    let heap_k = k.saturating_sub(1);
     let mut heaps: Vec<crate::knn_heap::KnnHeap> =
         (0..n).map(|_| crate::knn_heap::KnnHeap::new(heap_k)).collect();
 
@@ -477,7 +477,7 @@ fn fused_prim_cached(
 
         active.swap_remove(best_pos);
 
-        if active.len() > 64 && active.len() % 128 == 0 {
+        if active.len() > 64 && active.len().is_multiple_of(128) {
             active.sort_unstable();
         }
 

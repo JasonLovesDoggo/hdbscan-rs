@@ -46,6 +46,11 @@ impl KnnHeap {
     }
 
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
     }

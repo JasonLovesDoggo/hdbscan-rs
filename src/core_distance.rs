@@ -100,7 +100,7 @@ fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
     } else {
         let cd_ptr = core_distances.as_slice_mut().unwrap().as_mut_ptr();
         let nn_ptr = nn_indices.as_mut_ptr();
-        let chunk_size = (n + n_threads - 1) / n_threads;
+        let chunk_size = n.div_ceil(n_threads);
 
         // SAFETY: each thread writes to disjoint index ranges [start..end)
         // and only reads shared tree + data_slice (immutable).
@@ -187,7 +187,7 @@ pub fn compute_core_distances_brute_upper_triangle(
     let n = data.nrows();
     let dim = data.ncols();
     let k = min_samples.min(n);
-    let heap_k = if k > 1 { k - 1 } else { 0 };
+    let heap_k = k.saturating_sub(1);
 
     let data_contiguous = data.as_standard_layout();
     let data_slice = data_contiguous.as_slice().unwrap();
