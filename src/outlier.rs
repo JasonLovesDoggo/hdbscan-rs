@@ -44,7 +44,10 @@ pub fn compute_outlier_scores(condensed_tree: &[CondensedTreeEdge], n_points: us
 
     // Compute max lambda per cluster from point fallouts
     for edge in condensed_tree {
-        if edge.child < n_points && edge.lambda_val.is_finite() && edge.lambda_val > max_lambda[edge.parent] {
+        if edge.child < n_points
+            && edge.lambda_val.is_finite()
+            && edge.lambda_val > max_lambda[edge.parent]
+        {
             max_lambda[edge.parent] = edge.lambda_val;
         }
     }

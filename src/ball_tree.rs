@@ -73,7 +73,15 @@ impl BallTree {
         let mut centroids_buf = Vec::with_capacity(max_nodes * dim);
 
         if n > 0 {
-            Self::build_recursive(&flat_data, &mut sorted_indices, 0, n, dim, &mut nodes, &mut centroids_buf);
+            Self::build_recursive(
+                &flat_data,
+                &mut sorted_indices,
+                0,
+                n,
+                dim,
+                &mut nodes,
+                &mut centroids_buf,
+            );
         }
 
         // Build tree-ordered data for cache-friendly leaf access
@@ -234,8 +242,10 @@ impl BallTree {
         let a = &self.nodes[node_a];
         let b = &self.nodes[node_b];
 
-        let centroid_dist_sq =
-            crate::simd_distance::squared_euclidean_simd(self.centroid(node_a), self.centroid(node_b));
+        let centroid_dist_sq = crate::simd_distance::squared_euclidean_simd(
+            self.centroid(node_a),
+            self.centroid(node_b),
+        );
         let centroid_dist = centroid_dist_sq.sqrt();
         let gap = centroid_dist - a.radius - b.radius;
 
@@ -270,7 +280,13 @@ impl BallTree {
         let mut sqrt_max_dist = f64::INFINITY;
         let root_centroid_dist_sq =
             crate::simd_distance::squared_euclidean_simd(query, self.centroid(0));
-        self.knn_recursive(0, query, &mut heap, &mut sqrt_max_dist, root_centroid_dist_sq);
+        self.knn_recursive(
+            0,
+            query,
+            &mut heap,
+            &mut sqrt_max_dist,
+            root_centroid_dist_sq,
+        );
         let core_dist = heap.max_dist_sq().sqrt();
         let nn = heap.nearest_non_self(self_idx);
         (core_dist, nn)
@@ -286,7 +302,13 @@ impl BallTree {
         let mut sqrt_max_dist = f64::INFINITY;
         let root_centroid_dist_sq =
             crate::simd_distance::squared_euclidean_simd(query, self.centroid(0));
-        self.knn_recursive(0, query, &mut heap, &mut sqrt_max_dist, root_centroid_dist_sq);
+        self.knn_recursive(
+            0,
+            query,
+            &mut heap,
+            &mut sqrt_max_dist,
+            root_centroid_dist_sq,
+        );
         heap.into_sorted_distances()
     }
 
@@ -328,10 +350,9 @@ impl BallTree {
             let tree_data = &self.tree_data;
             for pos in node.idx_start..node.idx_end {
                 let base = pos * dim;
-                let dist_sq = crate::simd_distance::squared_euclidean_simd(
-                    query,
-                    unsafe { tree_data.get_unchecked(base..base + dim) },
-                );
+                let dist_sq = crate::simd_distance::squared_euclidean_simd(query, unsafe {
+                    tree_data.get_unchecked(base..base + dim)
+                });
                 let idx = self.sorted_indices[pos];
                 heap.push(dist_sq, idx);
             }
@@ -434,16 +455,10 @@ mod tests {
         let n = 100;
         let mut rows = Vec::new();
         for i in 0..n / 2 {
-            rows.push(vec![
-                (i as f64) * 0.01,
-                (i as f64) * 0.01,
-            ]);
+            rows.push(vec![(i as f64) * 0.01, (i as f64) * 0.01]);
         }
         for i in 0..n / 2 {
-            rows.push(vec![
-                100.0 + (i as f64) * 0.01,
-                100.0 + (i as f64) * 0.01,
-            ]);
+            rows.push(vec![100.0 + (i as f64) * 0.01, 100.0 + (i as f64) * 0.01]);
         }
         let mut data = ndarray::Array2::zeros((n, 2));
         for (i, row) in rows.iter().enumerate() {

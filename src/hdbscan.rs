@@ -208,13 +208,18 @@ impl Hdbscan {
             // Fused core+Prim's: compute all pairwise distances once (GEMM for high dim,
             // SIMD for low dim), extract core distances, then run Prim's with O(1) lookups.
             // Only worthwhile at dim > 16 where per-distance cost justifies caching.
-            if matches!(self.params.metric, Metric::Euclidean) && self.params.alpha == 1.0
-                && dim > 16 {
+            if matches!(self.params.metric, Metric::Euclidean)
+                && self.params.alpha == 1.0
+                && dim > 16
+            {
                 // High dim, small n: fused GEMM+Prim's (GEMM efficient, cached lookups)
                 mst::prim::fused_core_and_prim(data, min_samples)
             } else {
-                let (core_distances, nn_indices) =
-                    core_distance::compute_core_distances_with_nn(data, &self.params.metric, min_samples);
+                let (core_distances, nn_indices) = core_distance::compute_core_distances_with_nn(
+                    data,
+                    &self.params.metric,
+                    min_samples,
+                );
                 let mst_edges = mst::auto_mst(
                     data,
                     &core_distances.view(),

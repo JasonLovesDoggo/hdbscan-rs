@@ -35,7 +35,8 @@ pub fn compute_probabilities(
     for edge in condensed_tree {
         if edge.child >= n_points {
             cluster_parent[edge.child] = edge.parent;
-            if selected_clusters.contains(&edge.child) && edge.lambda_val < birth_lambda[edge.child] {
+            if selected_clusters.contains(&edge.child) && edge.lambda_val < birth_lambda[edge.child]
+            {
                 birth_lambda[edge.child] = edge.lambda_val;
             }
         }

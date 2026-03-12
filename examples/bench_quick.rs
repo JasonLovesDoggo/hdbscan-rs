@@ -5,23 +5,28 @@ fn bench_config(n: usize, dim: usize, mcs: usize, runs: usize) {
     // warmup
     {
         let mut h = hdbscan_rs::Hdbscan::new(hdbscan_rs::HdbscanParams {
-            min_cluster_size: mcs, ..Default::default()
+            min_cluster_size: mcs,
+            ..Default::default()
         });
         let _ = h.fit_predict(&data.view());
     }
     let mut times = Vec::new();
     for _ in 0..runs {
         let mut h = hdbscan_rs::Hdbscan::new(hdbscan_rs::HdbscanParams {
-            min_cluster_size: mcs, ..Default::default()
+            min_cluster_size: mcs,
+            ..Default::default()
         });
         let t = Instant::now();
         let labels = h.fit_predict(&data.view()).unwrap();
         times.push(t.elapsed().as_secs_f64() * 1000.0);
     }
-    times.sort_by(|a,b| a.partial_cmp(b).unwrap());
-    let median = times[times.len()/2];
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = times[times.len() / 2];
     let best = times[0];
-    println!("  {}x{}D mcs={}: median={:.1}ms best={:.1}ms", n, dim, mcs, median, best);
+    println!(
+        "  {}x{}D mcs={}: median={:.1}ms best={:.1}ms",
+        n, dim, mcs, median, best
+    );
 }
 
 fn main() {

@@ -14,15 +14,25 @@ fn main() {
     let t = Instant::now();
     let mut sum = 0.0f64;
     for i in 0..n {
-        for j in (i+1)..n {
+        for j in (i + 1)..n {
             let d = hdbscan_rs::simd_distance::squared_euclidean_flat(&data, i, j, dim);
             sum += d;
         }
     }
     let elapsed = t.elapsed();
-    println!("{}x{}D pairwise: {:.1}ms (sum={})", n, dim, elapsed.as_secs_f64() * 1000.0, sum);
+    println!(
+        "{}x{}D pairwise: {:.1}ms (sum={})",
+        n,
+        dim,
+        elapsed.as_secs_f64() * 1000.0,
+        sum
+    );
 
     // Time per distance
     let n_pairs = (n * (n - 1)) / 2;
-    println!("  {:.1}ns/dist, {} M pairs", elapsed.as_secs_f64() * 1e9 / n_pairs as f64, n_pairs / 1_000_000);
+    println!(
+        "  {:.1}ns/dist, {} M pairs",
+        elapsed.as_secs_f64() * 1e9 / n_pairs as f64,
+        n_pairs / 1_000_000
+    );
 }

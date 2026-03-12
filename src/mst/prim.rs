@@ -3,7 +3,6 @@ use crate::params::Metric;
 use crate::types::MstEdge;
 use ndarray::{ArrayView1, ArrayView2};
 
-
 /// Build MST using Prim's algorithm on the mutual reachability graph.
 ///
 /// Mutual reachability distance: d_mreach(a,b) = max(core(a), core(b), d(a,b)/alpha)
@@ -34,7 +33,9 @@ pub fn prim_mst_seeded(
     }
 
     match metric {
-        Metric::Euclidean if alpha == 1.0 => prim_mst_euclidean_fast(data, core_distances, nn_indices),
+        Metric::Euclidean if alpha == 1.0 => {
+            prim_mst_euclidean_fast(data, core_distances, nn_indices)
+        }
         Metric::Euclidean => prim_mst_euclidean_alpha(data, core_distances, alpha),
         _ => prim_mst_generic(data, core_distances, metric, alpha),
     }
@@ -256,11 +257,7 @@ pub fn fused_core_and_prim(
 /// Phase 1 using GEMM: compute Gram matrix X@X.T and derive distances.
 /// Uses matrixmultiply's cache-blocked matmul for high throughput.
 /// dist²(i,j) = ||x_i||² + ||x_j||² - 2*(x_i · x_j)
-fn fused_phase1_gemm(
-    data: &ArrayView2<f64>,
-    n: usize,
-    k: usize,
-) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+fn fused_phase1_gemm(data: &ArrayView2<f64>, n: usize, k: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     // Compute Gram matrix (all dot products) via cache-blocked matmul.
     // Use view directly to avoid an unnecessary data copy.
     let gram = data.dot(&data.t());
@@ -377,21 +374,24 @@ fn fused_phase1_simd(
     let data_slice = data_contiguous.as_slice().unwrap();
 
     // Compute squared norms for Prim's phase
-    let norms_sq: Vec<f64> = (0..n).map(|i| {
-        let off = i * dim;
-        let mut s = 0.0;
-        for d in 0..dim {
-            let v = unsafe { *data_slice.get_unchecked(off + d) };
-            s += v * v;
-        }
-        s
-    }).collect();
+    let norms_sq: Vec<f64> = (0..n)
+        .map(|i| {
+            let off = i * dim;
+            let mut s = 0.0;
+            for d in 0..dim {
+                let v = unsafe { *data_slice.get_unchecked(off + d) };
+                s += v * v;
+            }
+            s
+        })
+        .collect();
 
     // Build gram matrix (dot products) and kNN heaps simultaneously
     let mut gram = vec![0.0f64; n * n];
     let heap_k = k.saturating_sub(1);
-    let mut heaps: Vec<crate::knn_heap::KnnHeap> =
-        (0..n).map(|_| crate::knn_heap::KnnHeap::new(heap_k)).collect();
+    let mut heaps: Vec<crate::knn_heap::KnnHeap> = (0..n)
+        .map(|_| crate::knn_heap::KnnHeap::new(heap_k))
+        .collect();
 
     // Set diagonal (self dot products)
     for i in 0..n {
@@ -495,7 +495,8 @@ fn fused_prim_cached(
                 continue;
             }
             let d_sq = (ni + unsafe { *norms_sq.get_unchecked(j) }
-                - 2.0 * unsafe { *gram.get_unchecked(row_offset + j) }).max(0.0);
+                - 2.0 * unsafe { *gram.get_unchecked(row_offset + j) })
+            .max(0.0);
             if d_sq >= mw_sq_j {
                 continue;
             }
@@ -517,7 +518,6 @@ fn fused_prim_cached(
 fn squared_euclidean(data: &[f64], i: usize, j: usize, dim: usize) -> f64 {
     crate::simd_distance::squared_euclidean_flat(data, i, j, dim)
 }
-
 
 /// Generic Prim's MST for non-Euclidean metrics. Precomputes the full matrix.
 fn prim_mst_generic(

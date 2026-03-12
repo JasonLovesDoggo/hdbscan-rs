@@ -1,5 +1,5 @@
-use std::time::Instant;
 use ndarray::Array2;
+use std::time::Instant;
 
 fn bench_pipeline(n: usize, dim: usize) {
     let mut data = Array2::zeros((n, dim));
@@ -27,15 +27,17 @@ fn bench_pipeline(n: usize, dim: usize) {
     // MST: kd-tree Boruvka
     let t = Instant::now();
     let kd_tree = hdbscan_rs::kdtree_bounded::BoundedKdTree::build(&data.view());
-    let kd_edges = hdbscan_rs::mst::dual_tree_boruvka::dual_tree_boruvka_mst(
-        &kd_tree, &cd.view(), 1.0, None,
-    );
+    let kd_edges =
+        hdbscan_rs::mst::dual_tree_boruvka::dual_tree_boruvka_mst(&kd_tree, &cd.view(), 1.0, None);
     let kd_mst_ms = t.elapsed().as_millis();
 
     // MST: Prim's
     let t = Instant::now();
     let prim_edges = hdbscan_rs::mst::prim::prim_mst(
-        &data.view(), &cd.view(), &hdbscan_rs::params::Metric::Euclidean, 1.0,
+        &data.view(),
+        &cd.view(),
+        &hdbscan_rs::params::Metric::Euclidean,
+        1.0,
     );
     let prim_mst_ms = t.elapsed().as_millis();
 
@@ -44,9 +46,11 @@ fn bench_pipeline(n: usize, dim: usize) {
     let sl = hdbscan_rs::linkage::mst_to_single_linkage(&kd_edges, n);
     let condensed = hdbscan_rs::condensed_tree::build_condensed_tree(&sl, n, 10);
     let _selection = hdbscan_rs::cluster_selection::select_clusters(
-        &condensed, n,
+        &condensed,
+        n,
         hdbscan_rs::params::ClusterSelectionMethod::Eom,
-        0.0, false,
+        0.0,
+        false,
     );
     let rest_ms = t.elapsed().as_millis();
 

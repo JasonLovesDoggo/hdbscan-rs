@@ -167,9 +167,16 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree + Sync>(
             if n_threads <= 1 || n < 256 || root.is_leaf() {
                 // Single-threaded path
                 dual_tree_search(
-                    tree, 0, 0,
-                    core_dists, &core_dists_sq, &node_min_core_sq,
-                    &point_component, &mut component_best, &node_component, alpha,
+                    tree,
+                    0,
+                    0,
+                    core_dists,
+                    &core_dists_sq,
+                    &node_min_core_sq,
+                    &point_component,
+                    &mut component_best,
+                    &node_component,
+                    alpha,
                 );
             } else {
                 // Collect query subtrees at depth 1-2 for parallelism
@@ -190,9 +197,16 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree + Sync>(
                             let mut local_best = cb_ref.clone();
                             s.spawn(move || {
                                 dual_tree_search(
-                                    tree, qnode, 0,
-                                    cd_ref, cdsq_ref, nmcsq_ref,
-                                    pc_ref, &mut local_best, nc_ref, alpha,
+                                    tree,
+                                    qnode,
+                                    0,
+                                    cd_ref,
+                                    cdsq_ref,
+                                    nmcsq_ref,
+                                    pc_ref,
+                                    &mut local_best,
+                                    nc_ref,
+                                    alpha,
                                 );
                                 local_best
                             })
@@ -342,7 +356,11 @@ fn compute_node_components_cached<T: SpatialTree>(
             } else {
                 usize::MAX
             };
-            if left_comp == right_comp { left_comp } else { usize::MAX }
+            if left_comp == right_comp {
+                left_comp
+            } else {
+                usize::MAX
+            }
         };
         node_component[node_idx] = comp;
         comp

@@ -77,7 +77,6 @@ pub fn squared_euclidean_flat(data: &[f64], i: usize, j: usize, dim: usize) -> f
     squared_euclidean_simd(a, b)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

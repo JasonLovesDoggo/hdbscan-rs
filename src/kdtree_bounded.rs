@@ -208,8 +208,26 @@ impl BoundedKdTree {
         });
 
         // All points go into children — no point stored at internal node
-        let left = Self::build_recursive(data, indices, start, mid, dim, nodes, bbox_min_buf, bbox_max_buf);
-        let right = Self::build_recursive(data, indices, mid, end, dim, nodes, bbox_min_buf, bbox_max_buf);
+        let left = Self::build_recursive(
+            data,
+            indices,
+            start,
+            mid,
+            dim,
+            nodes,
+            bbox_min_buf,
+            bbox_max_buf,
+        );
+        let right = Self::build_recursive(
+            data,
+            indices,
+            mid,
+            end,
+            dim,
+            nodes,
+            bbox_min_buf,
+            bbox_max_buf,
+        );
 
         nodes[node_idx].left = left;
         nodes[node_idx].right = right;
@@ -282,7 +300,12 @@ impl BoundedKdTree {
 
     /// Public wrapper for knn_recursive, used by CoreDistQuery::query_core_dist_reuse.
     #[inline]
-    pub fn knn_recursive_pub(&self, node_idx: usize, query: &[f64], heap: &mut crate::knn_heap::KnnHeap) {
+    pub fn knn_recursive_pub(
+        &self,
+        node_idx: usize,
+        query: &[f64],
+        heap: &mut crate::knn_heap::KnnHeap,
+    ) {
         self.knn_recursive(node_idx, query, heap);
     }
 

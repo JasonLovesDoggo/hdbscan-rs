@@ -142,19 +142,30 @@ pub struct SendPtr<T>(pub *mut T);
 unsafe impl<T> Send for SendPtr<T> {}
 unsafe impl<T> Sync for SendPtr<T> {}
 
-
 /// Trait for tree structures that can answer core distance queries.
 pub trait CoreDistQuery {
     fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize);
     /// kNN search using a pre-allocated, pre-cleared heap (avoids per-query allocation).
-    fn query_core_dist_reuse(&self, query: &[f64], k: usize, self_idx: usize, heap: &mut crate::knn_heap::KnnHeap);
+    fn query_core_dist_reuse(
+        &self,
+        query: &[f64],
+        k: usize,
+        self_idx: usize,
+        heap: &mut crate::knn_heap::KnnHeap,
+    );
 }
 
 impl CoreDistQuery for BoundedKdTree {
     fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
         self.query_core_dist(query, k, self_idx)
     }
-    fn query_core_dist_reuse(&self, query: &[f64], _k: usize, _self_idx: usize, heap: &mut crate::knn_heap::KnnHeap) {
+    fn query_core_dist_reuse(
+        &self,
+        query: &[f64],
+        _k: usize,
+        _self_idx: usize,
+        heap: &mut crate::knn_heap::KnnHeap,
+    ) {
         if !self.nodes.is_empty() {
             self.knn_recursive_pub(0, query, heap);
         }
@@ -165,7 +176,13 @@ impl CoreDistQuery for BallTree {
     fn query_core_dist(&self, query: &[f64], k: usize, self_idx: usize) -> (f64, usize) {
         self.query_core_dist(query, k, self_idx)
     }
-    fn query_core_dist_reuse(&self, query: &[f64], _k: usize, _self_idx: usize, heap: &mut crate::knn_heap::KnnHeap) {
+    fn query_core_dist_reuse(
+        &self,
+        query: &[f64],
+        _k: usize,
+        _self_idx: usize,
+        heap: &mut crate::knn_heap::KnnHeap,
+    ) {
         if !self.nodes.is_empty() {
             let mut sqrt_max_dist = f64::INFINITY;
             let root_centroid_dist_sq =
@@ -256,9 +273,8 @@ fn compute_core_distances_precomputed_with_nn(
     let mut nn_indices = vec![0usize; n];
 
     for i in 0..n {
-        let mut dists: Vec<(OrderedFloat<f64>, usize)> = (0..n)
-            .map(|j| (OrderedFloat(data[[i, j]]), j))
-            .collect();
+        let mut dists: Vec<(OrderedFloat<f64>, usize)> =
+            (0..n).map(|j| (OrderedFloat(data[[i, j]]), j)).collect();
         dists.sort_unstable();
         let idx = k.min(n) - 1;
         core_distances[i] = dists[idx].0.into_inner();
@@ -364,7 +380,8 @@ mod tests {
         ];
         let tree = BoundedKdTree::build(&data.view());
         let (cd_kd, _) = compute_core_distances_with_bounded_kdtree(&tree, &data.view(), 3);
-        let (cd_brute, _) = compute_core_distances_brute_with_nn(&data.view(), &Metric::Euclidean, 3);
+        let (cd_brute, _) =
+            compute_core_distances_brute_with_nn(&data.view(), &Metric::Euclidean, 3);
         for i in 0..6 {
             assert!(
                 (cd_kd[i] - cd_brute[i]).abs() < 1e-10,

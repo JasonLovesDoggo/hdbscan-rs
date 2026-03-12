@@ -9,7 +9,10 @@ fn main() {
     // Warmup
     {
         use hdbscan_rs::{Hdbscan, HdbscanParams};
-        let mut h = Hdbscan::new(HdbscanParams { min_cluster_size: 10, ..Default::default() });
+        let mut h = Hdbscan::new(HdbscanParams {
+            min_cluster_size: 10,
+            ..Default::default()
+        });
         let _ = h.fit_predict(&data.view());
     }
 
@@ -31,9 +34,12 @@ fn main() {
         let ni = norms_sq[i];
         let row_off = i * n;
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let d_sq = unsafe {
-                (ni + *norms_sq.get_unchecked(j) - 2.0 * *gram_slice.get_unchecked(row_off + j)).max(0.0)
+                (ni + *norms_sq.get_unchecked(j) - 2.0 * *gram_slice.get_unchecked(row_off + j))
+                    .max(0.0)
             };
             heap.push(d_sq, j);
         }
@@ -59,7 +65,9 @@ fn main() {
     }
 
     for _ in 0..(n - 1) {
-        if active.is_empty() { break; }
+        if active.is_empty() {
+            break;
+        }
         let mut best_pos = 0;
         let mut best_sq = min_weight_sq[active[0]];
         let mut best_idx = active[0];
@@ -84,10 +92,16 @@ fn main() {
         let row_offset = min_idx * n;
         for &j in &active {
             let mw = min_weight_sq[j];
-            if core_i_sq >= mw { continue; }
-            if core_dists_sq[j] >= mw { continue; }
+            if core_i_sq >= mw {
+                continue;
+            }
+            if core_dists_sq[j] >= mw {
+                continue;
+            }
             let d_sq = (ni + norms_sq[j] - 2.0 * gram_vec[row_offset + j]).max(0.0);
-            if d_sq >= mw { continue; }
+            if d_sq >= mw {
+                continue;
+            }
             let mr_sq = f64::max(f64::max(core_i_sq, core_dists_sq[j]), d_sq);
             if mr_sq < mw {
                 min_weight_sq[j] = mr_sq;
@@ -101,5 +115,8 @@ fn main() {
     println!("  GEMM:       {:>6.1}ms", t_gemm.as_secs_f64() * 1000.0);
     println!("  Core:       {:>6.1}ms", t_core.as_secs_f64() * 1000.0);
     println!("  Prim's:     {:>6.1}ms", t_prim.as_secs_f64() * 1000.0);
-    println!("  Total:      {:>6.1}ms", (t_gemm + t_core + t_prim).as_secs_f64() * 1000.0);
+    println!(
+        "  Total:      {:>6.1}ms",
+        (t_gemm + t_core + t_prim).as_secs_f64() * 1000.0
+    );
 }

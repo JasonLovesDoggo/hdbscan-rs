@@ -1,5 +1,5 @@
-use std::time::Instant;
 use ndarray::Array2;
+use std::time::Instant;
 
 fn make_gaussian_blobs(n: usize, dim: usize, n_clusters: usize, seed: u64) -> Array2<f64> {
     let mut data = Array2::zeros((n, dim));
@@ -7,15 +7,24 @@ fn make_gaussian_blobs(n: usize, dim: usize, n_clusters: usize, seed: u64) -> Ar
     let per_cluster = n / n_clusters;
     for c in 0..n_clusters {
         let start = c * per_cluster;
-        let end = if c == n_clusters - 1 { n } else { start + per_cluster };
+        let end = if c == n_clusters - 1 {
+            n
+        } else {
+            start + per_cluster
+        };
         let center = (c as f64) * 10.0;
         for i in start..end {
             for d in 0..dim {
-                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let u1 = (rng >> 33) as f64 / (1u64 << 31) as f64;
-                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let u2 = (rng >> 33) as f64 / (1u64 << 31) as f64;
-                let z = (-2.0 * u1.max(1e-300).ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                let z =
+                    (-2.0 * u1.max(1e-300).ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                 data[[i, d]] = center + z * 2.0;
             }
         }
@@ -39,7 +48,14 @@ fn main() {
         }
         let knn_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
-        println!("{}x{}D: build={:.1}ms, kNN={:.1}ms, total={:.1}ms, nodes={}",
-            n, dim, build_ms, knn_ms, build_ms + knn_ms, tree.nodes.len());
+        println!(
+            "{}x{}D: build={:.1}ms, kNN={:.1}ms, total={:.1}ms, nodes={}",
+            n,
+            dim,
+            build_ms,
+            knn_ms,
+            build_ms + knn_ms,
+            tree.nodes.len()
+        );
     }
 }

@@ -40,9 +40,9 @@ pub mod mst;
 pub mod outlier;
 pub mod params;
 pub mod prediction;
-pub mod types;
 pub mod simd_distance;
 pub mod spatial_tree;
+pub mod types;
 pub mod union_find;
 
 /// Test/benchmark utilities (not part of public API).

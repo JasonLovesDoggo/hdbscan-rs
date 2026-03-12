@@ -9,7 +9,8 @@ fn main() {
         // Warmup
         {
             let mut h = hdbscan_rs::Hdbscan::new(hdbscan_rs::HdbscanParams {
-                min_cluster_size: 10, ..Default::default()
+                min_cluster_size: 10,
+                ..Default::default()
             });
             let _ = h.fit_predict(&data.view());
         }
@@ -21,7 +22,11 @@ fn main() {
 
         let t1 = Instant::now();
         let (core_distances, nn_indices) =
-            hdbscan_rs::core_distance::compute_core_distances_with_bounded_kdtree(&tree, &data.view(), min_samples);
+            hdbscan_rs::core_distance::compute_core_distances_with_bounded_kdtree(
+                &tree,
+                &data.view(),
+                min_samples,
+            );
         let t_core = t1.elapsed();
 
         // Phase 2: MST
@@ -38,9 +43,26 @@ fn main() {
         let t3 = Instant::now();
         let single_linkage = hdbscan_rs::linkage::mst_to_single_linkage(&mst_edges, n);
         let condensed = hdbscan_rs::condensed_tree::build_condensed_tree(&single_linkage, n, 10);
-        let selection = hdbscan_rs::cluster_selection::select_clusters(&condensed, n, hdbscan_rs::ClusterSelectionMethod::Eom, 0.0, false);
-        let labels = hdbscan_rs::labels::assign_labels(&condensed, &selection.selected_clusters, n, false, 0.0);
-        let probs = hdbscan_rs::membership::compute_probabilities(&condensed, &selection.selected_clusters, &labels, n);
+        let selection = hdbscan_rs::cluster_selection::select_clusters(
+            &condensed,
+            n,
+            hdbscan_rs::ClusterSelectionMethod::Eom,
+            0.0,
+            false,
+        );
+        let labels = hdbscan_rs::labels::assign_labels(
+            &condensed,
+            &selection.selected_clusters,
+            n,
+            false,
+            0.0,
+        );
+        let probs = hdbscan_rs::membership::compute_probabilities(
+            &condensed,
+            &selection.selected_clusters,
+            &labels,
+            n,
+        );
         let outliers = hdbscan_rs::outlier::compute_outlier_scores(&condensed, n);
         let t_rest = t3.elapsed();
 
@@ -49,7 +71,10 @@ fn main() {
         println!("  Core dists:  {:>7.1}ms", t_core.as_secs_f64() * 1000.0);
         println!("  Boruvka MST: {:>7.1}ms", t_mst.as_secs_f64() * 1000.0);
         println!("  Post-proc:   {:>7.1}ms", t_rest.as_secs_f64() * 1000.0);
-        println!("  Total:       {:>7.1}ms", (t_tree + t_core + t_mst + t_rest).as_secs_f64() * 1000.0);
+        println!(
+            "  Total:       {:>7.1}ms",
+            (t_tree + t_core + t_mst + t_rest).as_secs_f64() * 1000.0
+        );
         println!();
     }
 }
