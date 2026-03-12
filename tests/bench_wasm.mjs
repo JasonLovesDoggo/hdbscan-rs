@@ -1,12 +1,13 @@
-import { HDBSCAN } from './hdbscan_rs.js';
+import { HDBSCAN } from "./hdbscan_rs.js";
 
 // Simple seeded PRNG (mulberry32)
 function mulberry32(seed) {
-  return function() {
-    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
@@ -25,7 +26,8 @@ function makeBlobs(n, dim, nCenters, seed) {
     const c = centers[i % nCenters];
     for (let d = 0; d < dim; d++) {
       // Box-Muller for gaussian noise
-      const u1 = rng(), u2 = rng();
+      const u1 = rng(),
+        u2 = rng();
       const noise = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
       data[i * dim + d] = c[d] + noise;
     }
@@ -55,9 +57,11 @@ function bench(label, n, dim, nCenters, mcs, warmup = 2, iters = 5) {
     // Count clusters on last iter
     if (i === iters - 1) {
       const unique = new Set(labels);
-      const nClusters = [...unique].filter(l => l >= 0).length;
-      const noise = labels.filter(l => l === -1).length;
-      console.log(`  ${label}: ${median(times).toFixed(1)}ms (median of ${iters}), ${nClusters} clusters, ${noise} noise`);
+      const nClusters = [...unique].filter((l) => l >= 0).length;
+      const noise = labels.filter((l) => l === -1).length;
+      console.log(
+        `  ${label}: ${median(times).toFixed(1)}ms (median of ${iters}), ${nClusters} clusters, ${noise} noise`,
+      );
     }
     h.free();
   }
@@ -73,11 +77,11 @@ function median(arr) {
 console.log("=== HDBSCAN-RS WASM Benchmark ===\n");
 
 const configs = [
-  ["5Kx10D",   5000,  10, 5,  10],
-  ["5Kx50D",   5000,  50, 5,  10],
-  ["50Kx2D",  50000,   2, 5,  10],
-  ["1Kx256D",  1000, 256, 3,   5],
-  ["10Kx10D", 10000,  10, 5,  10],
+  ["5Kx10D", 5000, 10, 5, 10],
+  ["5Kx50D", 5000, 50, 5, 10],
+  ["50Kx2D", 50000, 2, 5, 10],
+  ["1Kx256D", 1000, 256, 3, 5],
+  ["10Kx10D", 10000, 10, 5, 10],
 ];
 
 for (const [label, n, dim, nc, mcs] of configs) {

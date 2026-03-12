@@ -179,4 +179,9 @@ impl HDBSCAN {
     pub fn outlier_scores(&self) -> Option<Vec<f64>> {
         self.inner.outlier_scores().map(|s| s.to_vec())
     }
+
+    /// Get cluster persistence values after fitting. Returns null if not fitted.
+    pub fn cluster_persistence(&self) -> Option<Vec<f64>> {
+        self.inner.cluster_persistence().map(|p| p.to_vec())
+    }
 }
