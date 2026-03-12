@@ -160,9 +160,12 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree + Sync>(
         if !tree.nodes().is_empty() {
             let nodes = tree.nodes();
             let root = &nodes[0];
+            #[cfg(not(target_arch = "wasm32"))]
             let n_threads = std::thread::available_parallelism()
                 .map(|p| p.get())
                 .unwrap_or(1);
+            #[cfg(target_arch = "wasm32")]
+            let n_threads = 1usize;
 
             if n_threads <= 1 || n < 256 || root.is_leaf() {
                 // Single-threaded path
@@ -179,47 +182,50 @@ pub fn dual_tree_boruvka_mst<T: SpatialTree + Sync>(
                     alpha,
                 );
             } else {
-                // Collect query subtrees at depth 1-2 for parallelism
-                let mut query_roots = Vec::new();
-                collect_query_subtrees(tree, 0, 0, n_threads.min(8), &mut query_roots);
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // Collect query subtrees at depth 1-2 for parallelism
+                    let mut query_roots = Vec::new();
+                    collect_query_subtrees(tree, 0, 0, n_threads.min(8), &mut query_roots);
 
-                let cb_ref = &component_best;
-                let cd_ref: &[f64] = core_dists;
-                let cdsq_ref: &[f64] = &core_dists_sq;
-                let nmcsq_ref: &[f64] = &node_min_core_sq;
-                let pc_ref: &[usize] = &point_component;
-                let nc_ref: &[usize] = &node_component;
+                    let cb_ref = &component_best;
+                    let cd_ref: &[f64] = core_dists;
+                    let cdsq_ref: &[f64] = &core_dists_sq;
+                    let nmcsq_ref: &[f64] = &node_min_core_sq;
+                    let pc_ref: &[usize] = &point_component;
+                    let nc_ref: &[usize] = &node_component;
 
-                let thread_bests: Vec<Vec<ComponentBest>> = std::thread::scope(|s| {
-                    let handles: Vec<_> = query_roots
-                        .iter()
-                        .map(|&qnode| {
-                            let mut local_best = cb_ref.clone();
-                            s.spawn(move || {
-                                dual_tree_search(
-                                    tree,
-                                    qnode,
-                                    0,
-                                    cd_ref,
-                                    cdsq_ref,
-                                    nmcsq_ref,
-                                    pc_ref,
-                                    &mut local_best,
-                                    nc_ref,
-                                    alpha,
-                                );
-                                local_best
+                    let thread_bests: Vec<Vec<ComponentBest>> = std::thread::scope(|s| {
+                        let handles: Vec<_> = query_roots
+                            .iter()
+                            .map(|&qnode| {
+                                let mut local_best = cb_ref.clone();
+                                s.spawn(move || {
+                                    dual_tree_search(
+                                        tree,
+                                        qnode,
+                                        0,
+                                        cd_ref,
+                                        cdsq_ref,
+                                        nmcsq_ref,
+                                        pc_ref,
+                                        &mut local_best,
+                                        nc_ref,
+                                        alpha,
+                                    );
+                                    local_best
+                                })
                             })
-                        })
-                        .collect();
-                    handles.into_iter().map(|h| h.join().unwrap()).collect()
-                });
+                            .collect();
+                        handles.into_iter().map(|h| h.join().unwrap()).collect()
+                    });
 
-                // Merge: for each component, take the best across all threads
-                for thread_best in &thread_bests {
-                    for i in 0..n {
-                        if thread_best[i].mr_dist_sq < component_best[i].mr_dist_sq {
-                            component_best[i] = thread_best[i];
+                    // Merge: for each component, take the best across all threads
+                    for thread_best in &thread_bests {
+                        for i in 0..n {
+                            if thread_best[i].mr_dist_sq < component_best[i].mr_dist_sq {
+                                component_best[i] = thread_best[i];
+                            }
                         }
                     }
                 }
@@ -565,6 +571,7 @@ fn dual_tree_search<T: SpatialTree>(
 
 /// Collect query subtree roots for parallel processing.
 /// Splits the query tree to `target_count` subtrees (approximately).
+#[cfg(not(target_arch = "wasm32"))]
 fn collect_query_subtrees<T: SpatialTree>(
     tree: &T,
     node_idx: usize,

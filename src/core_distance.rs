@@ -82,10 +82,13 @@ fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
 
     // Parallel kNN: split queries across threads for ~linear speedup.
     // Each thread gets its own KnnHeap and writes to disjoint output slices.
+    #[cfg(not(target_arch = "wasm32"))]
     let n_threads = std::thread::available_parallelism()
         .map(|p| p.get())
         .unwrap_or(1)
         .min(n);
+    #[cfg(target_arch = "wasm32")]
+    let n_threads = 1usize;
 
     if n_threads <= 1 || n < 256 {
         // Single-threaded for small n or single-core
@@ -98,38 +101,41 @@ fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
             nn_indices[i] = heap.nearest_non_self(i);
         }
     } else {
-        let cd_ptr = core_distances.as_slice_mut().unwrap().as_mut_ptr();
-        let nn_ptr = nn_indices.as_mut_ptr();
-        let chunk_size = n.div_ceil(n_threads);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let cd_ptr = core_distances.as_slice_mut().unwrap().as_mut_ptr();
+            let nn_ptr = nn_indices.as_mut_ptr();
+            let chunk_size = n.div_ceil(n_threads);
 
-        // SAFETY: each thread writes to disjoint index ranges [start..end)
-        // and only reads shared tree + data_slice (immutable).
-        std::thread::scope(|s| {
-            for t in 0..n_threads {
-                let start = t * chunk_size;
-                let end = (start + chunk_size).min(n);
-                if start >= end {
-                    continue;
-                }
-                let cd_s = SendPtr(cd_ptr);
-                let nn_s = SendPtr(nn_ptr);
-
-                s.spawn(move || {
-                    let cd = cd_s;
-                    let nn = nn_s;
-                    let mut heap = crate::knn_heap::KnnHeap::new(k);
-                    for i in start..end {
-                        heap.clear();
-                        let query = &data_slice[i * dim..(i + 1) * dim];
-                        tree.query_core_dist_reuse(query, k, i, &mut heap);
-                        unsafe {
-                            *cd.0.add(i) = heap.max_dist_sq().sqrt();
-                            *nn.0.add(i) = heap.nearest_non_self(i);
-                        }
+            // SAFETY: each thread writes to disjoint index ranges [start..end)
+            // and only reads shared tree + data_slice (immutable).
+            std::thread::scope(|s| {
+                for t in 0..n_threads {
+                    let start = t * chunk_size;
+                    let end = (start + chunk_size).min(n);
+                    if start >= end {
+                        continue;
                     }
-                });
-            }
-        });
+                    let cd_s = SendPtr(cd_ptr);
+                    let nn_s = SendPtr(nn_ptr);
+
+                    s.spawn(move || {
+                        let cd = cd_s;
+                        let nn = nn_s;
+                        let mut heap = crate::knn_heap::KnnHeap::new(k);
+                        for i in start..end {
+                            heap.clear();
+                            let query = &data_slice[i * dim..(i + 1) * dim];
+                            tree.query_core_dist_reuse(query, k, i, &mut heap);
+                            unsafe {
+                                *cd.0.add(i) = heap.max_dist_sq().sqrt();
+                                *nn.0.add(i) = heap.nearest_non_self(i);
+                            }
+                        }
+                    });
+                }
+            });
+        }
     }
 
     (core_distances, nn_indices)
@@ -137,9 +143,12 @@ fn compute_core_distances_tree<T: CoreDistQuery + Sync>(
 
 /// Wrapper to send raw pointers across thread boundaries.
 /// SAFETY: caller must ensure disjoint access patterns.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 pub struct SendPtr<T>(pub *mut T);
+#[cfg(not(target_arch = "wasm32"))]
 unsafe impl<T> Send for SendPtr<T> {}
+#[cfg(not(target_arch = "wasm32"))]
 unsafe impl<T> Sync for SendPtr<T> {}
 
 /// Trait for tree structures that can answer core distance queries.

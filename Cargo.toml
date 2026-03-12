@@ -21,6 +21,8 @@ log = "0.4"
 serde = { version = "1", features = ["derive"], optional = true }
 pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
 numpy = { version = "0.24", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
@@ -34,7 +36,15 @@ harness = false
 [profile.release]
 lto = "fat"
 
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+strip = true
+panic = "abort"
+codegen-units = 1
+
 [features]
 default = []
 serde = ["dep:serde"]
 python = ["dep:pyo3", "dep:numpy"]
+wasm = ["dep:wasm-bindgen", "dep:js-sys"]

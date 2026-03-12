@@ -52,6 +52,9 @@ pub mod bench_utils;
 #[cfg(feature = "python")]
 mod python;
 
+#[cfg(feature = "wasm")]
+mod wasm;
+
 // Re-exports
 pub use error::HdbscanError;
 pub use hdbscan::Hdbscan;

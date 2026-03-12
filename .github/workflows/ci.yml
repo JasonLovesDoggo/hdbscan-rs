@@ -19,13 +19,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Check
         run: cargo check --all-features
       - name: Test
         run: cargo test
-      - name: Test with Python feature
+      - name: Check Python feature
         run: cargo check --features python
+      - name: Check WASM target
+        run: cargo check --target wasm32-unknown-unknown --features wasm --no-default-features
       - name: Clippy
         if: matrix.rust == 'stable'
         run: cargo clippy -- -D warnings

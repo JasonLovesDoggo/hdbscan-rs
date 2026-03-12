@@ -272,10 +272,13 @@ fn fused_phase1_gemm(data: &ArrayView2<f64>, n: usize, k: usize) -> (Vec<f64>, V
     let mut core_dists_sq = vec![0.0f64; n];
 
     if heap_k > 0 {
+        #[cfg(not(target_arch = "wasm32"))]
         let n_threads = std::thread::available_parallelism()
             .map(|p| p.get())
             .unwrap_or(1)
             .min(n);
+        #[cfg(target_arch = "wasm32")]
+        let n_threads = 1usize;
 
         if n_threads <= 1 || n < 256 {
             let mut heap = crate::knn_heap::KnnHeap::new(heap_k);
@@ -305,56 +308,59 @@ fn fused_phase1_gemm(data: &ArrayView2<f64>, n: usize, k: usize) -> (Vec<f64>, V
                 }
             }
         } else {
-            let chunk_size = n.div_ceil(n_threads);
-            let norms_ref: &[f64] = &norms_sq;
-            let gram_ref: &[f64] = gram_slice;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let chunk_size = n.div_ceil(n_threads);
+                let norms_ref: &[f64] = &norms_sq;
+                let gram_ref: &[f64] = gram_slice;
 
-            // Split output into per-thread mutable slices (no raw pointers needed)
-            let mut chunks: Vec<(usize, &mut [f64])> = Vec::new();
-            let mut remaining = core_dists_sq.as_mut_slice();
-            for t in 0..n_threads {
-                let start = t * chunk_size;
-                let end = (start + chunk_size).min(n);
-                if start >= n {
-                    break;
+                // Split output into per-thread mutable slices (no raw pointers needed)
+                let mut chunks: Vec<(usize, &mut [f64])> = Vec::new();
+                let mut remaining = core_dists_sq.as_mut_slice();
+                for t in 0..n_threads {
+                    let start = t * chunk_size;
+                    let end = (start + chunk_size).min(n);
+                    if start >= n {
+                        break;
+                    }
+                    let take = end - start;
+                    let (chunk, rest) = remaining.split_at_mut(take);
+                    remaining = rest;
+                    chunks.push((start, chunk));
                 }
-                let take = end - start;
-                let (chunk, rest) = remaining.split_at_mut(take);
-                remaining = rest;
-                chunks.push((start, chunk));
+
+                std::thread::scope(|s| {
+                    for (start, chunk) in chunks {
+                        s.spawn(move || {
+                            let mut heap = crate::knn_heap::KnnHeap::new(heap_k);
+                            for (local_i, slot) in chunk.iter_mut().enumerate() {
+                                let i = start + local_i;
+                                heap.clear();
+                                let ni = norms_ref[i];
+                                let row_off = i * n;
+                                for j in 0..i {
+                                    let d_sq = unsafe {
+                                        (ni + *norms_ref.get_unchecked(j)
+                                            - 2.0 * *gram_ref.get_unchecked(row_off + j))
+                                        .max(0.0)
+                                    };
+                                    heap.push(d_sq, j);
+                                }
+                                for j in (i + 1)..n {
+                                    let d_sq = unsafe {
+                                        (ni + *norms_ref.get_unchecked(j)
+                                            - 2.0 * *gram_ref.get_unchecked(row_off + j))
+                                        .max(0.0)
+                                    };
+                                    heap.push(d_sq, j);
+                                }
+                                let val = heap.max_dist_sq();
+                                *slot = if val == f64::INFINITY { 0.0 } else { val };
+                            }
+                        });
+                    }
+                });
             }
-
-            std::thread::scope(|s| {
-                for (start, chunk) in chunks {
-                    s.spawn(move || {
-                        let mut heap = crate::knn_heap::KnnHeap::new(heap_k);
-                        for (local_i, slot) in chunk.iter_mut().enumerate() {
-                            let i = start + local_i;
-                            heap.clear();
-                            let ni = norms_ref[i];
-                            let row_off = i * n;
-                            for j in 0..i {
-                                let d_sq = unsafe {
-                                    (ni + *norms_ref.get_unchecked(j)
-                                        - 2.0 * *gram_ref.get_unchecked(row_off + j))
-                                    .max(0.0)
-                                };
-                                heap.push(d_sq, j);
-                            }
-                            for j in (i + 1)..n {
-                                let d_sq = unsafe {
-                                    (ni + *norms_ref.get_unchecked(j)
-                                        - 2.0 * *gram_ref.get_unchecked(row_off + j))
-                                    .max(0.0)
-                                };
-                                heap.push(d_sq, j);
-                            }
-                            let val = heap.max_dist_sq();
-                            *slot = if val == f64::INFINITY { 0.0 } else { val };
-                        }
-                    });
-                }
-            });
         }
     }
 
