@@ -368,10 +368,14 @@ fn dual_tree_search<T: SpatialTree>(
         let q_points = &sorted[q_node.idx_start()..q_node.idx_end()];
         let r_points = &sorted[r_node.idx_start()..r_node.idx_end()];
 
+        // Cache data pointer and dim for tight inner loop (avoids repeated field access)
+        let data = tree.data();
+        let dim = tree.dim();
+
         for &qi in q_points {
             let comp_q = point_component[qi];
             let core_q_sq = core_dists_sq[qi];
-            let best_q_sq = component_best[comp_q].mr_dist_sq;
+            let mut best_q_sq = component_best[comp_q].mr_dist_sq;
 
             // Core distance shortcut: can't beat current best (squared comparison)
             if core_q_sq >= best_q_sq {
@@ -392,7 +396,7 @@ fn dual_tree_search<T: SpatialTree>(
                     continue;
                 }
 
-                let d_sq = tree.dist_sq(qi, ri);
+                let d_sq = crate::simd_distance::squared_euclidean_flat(data, qi, ri, dim);
                 // MR² = max(core_max², d²) when alpha == 1.0
                 let mr_sq = if alpha == 1.0 {
                     f64::max(core_max_sq, d_sq)
@@ -410,6 +414,7 @@ fn dual_tree_search<T: SpatialTree>(
                         from: qi,
                         to: ri,
                     };
+                    best_q_sq = mr_sq; // Tighten bound for subsequent ri iterations
                 }
                 if mr_sq < component_best[comp_r].mr_dist_sq {
                     component_best[comp_r] = ComponentBest {
