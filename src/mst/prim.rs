@@ -268,28 +268,32 @@ fn fused_phase1_gemm(
     // Extract squared norms from diagonal
     let norms_sq: Vec<f64> = (0..n).map(|i| gram_slice[i * n + i]).collect();
 
-    // Extract core distances using kNN heaps
+    // Extract core distances using a single reusable kNN heap per row.
+    // Sequential row access is cache-friendly for the Gram matrix.
     let heap_k = if k > 1 { k - 1 } else { 0 };
-    let mut heaps: Vec<crate::knn_heap::KnnHeap> =
-        (0..n).map(|_| crate::knn_heap::KnnHeap::new(heap_k)).collect();
+    let mut core_dists_sq = vec![0.0f64; n];
 
     if heap_k > 0 {
+        let mut heap = crate::knn_heap::KnnHeap::new(heap_k);
         for i in 0..n {
+            heap.clear();
             let ni = norms_sq[i];
             let row_off = i * n;
-            for j in (i + 1)..n {
-                let d_sq = (ni + norms_sq[j] - 2.0 * gram_slice[row_off + j]).max(0.0);
-                heaps[i].push(d_sq, j);
-                heaps[j].push(d_sq, i);
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                let d_sq = unsafe {
+                    (ni + *norms_sq.get_unchecked(j)
+                        - 2.0 * *gram_slice.get_unchecked(row_off + j))
+                    .max(0.0)
+                };
+                heap.push(d_sq, j);
             }
-        }
-    }
-
-    let mut core_dists_sq = vec![0.0f64; n];
-    for i in 0..n {
-        core_dists_sq[i] = heaps[i].max_dist_sq();
-        if core_dists_sq[i] == f64::INFINITY {
-            core_dists_sq[i] = 0.0;
+            core_dists_sq[i] = heap.max_dist_sq();
+            if core_dists_sq[i] == f64::INFINITY {
+                core_dists_sq[i] = 0.0;
+            }
         }
     }
 
