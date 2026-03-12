@@ -31,6 +31,9 @@ serde = { version = "1", features = ["derive"] }
 name = "benchmark"
 harness = false
 
+[profile.release]
+lto = "fat"
+
 [features]
 default = []
 serde = ["dep:serde"]
