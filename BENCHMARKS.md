@@ -28,38 +28,38 @@ GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_compar
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 500x2D | 4.0 ms | 6.2 ms | **1.4 ms** | 3.0x | 4.5x | 1.00 |
-| 1Kx2D | 9.2 ms | 12.7 ms | **1.9 ms** | 4.9x | 6.8x | 1.00 |
-| 2Kx2D | 25.4 ms | 26.9 ms | **4.0 ms** | 6.4x | 6.8x | 1.00 |
-| 5Kx2D | 120 ms | 80.3 ms | **12.0 ms** | 9.9x | 6.7x | 1.00 |
-| 10Kx2D | 451 ms | 178 ms | **23.9 ms** | 18.9x | 7.5x | 1.00 |
-| 50Kx2D | 12,925 ms | 1,049 ms | **163 ms** | 79.1x | 6.4x | 1.00 |
+| 500x2D | 5.3 ms | 7.6 ms | **1.5 ms** | 3.5x | 5.1x | 1.00 |
+| 1Kx2D | 9.0 ms | 12.5 ms | **1.8 ms** | 5.0x | 6.9x | 1.00 |
+| 2Kx2D | 25.5 ms | 29.7 ms | **4.0 ms** | 6.4x | 7.5x | 1.00 |
+| 5Kx2D | 124 ms | 78.3 ms | **11.6 ms** | 10.7x | 6.7x | 1.00 |
+| 10Kx2D | 450 ms | 182 ms | **23.8 ms** | 18.9x | 7.7x | 1.00 |
+| 50Kx2D | 12,944 ms | 1,075 ms | **167 ms** | 77.7x | 6.5x | 1.00 |
 
 ### Medium-dimensional
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 5Kx10D | 242 ms | 139 ms | **91 ms** | 2.7x | 1.5x | 1.00 |
-| 5Kx50D | 933 ms | 379 ms | **312 ms** | 3.0x | 1.2x | 1.00 |
+| 5Kx10D | 258 ms | 140 ms | **96 ms** | 2.7x | 1.5x | 1.00 |
+| 5Kx50D | 929 ms | 383 ms | **295 ms** | 3.2x | 1.3x | 1.00 |
 
 ### High-dimensional (LLM embeddings)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs | vs sklearn | vs C-hdbscan | ARI |
 |--------|--------:|----------:|-----------:|-----------:|-------------:|----:|
-| 2Kx256D | 919 ms | 851 ms | **78 ms** | 11.7x | 10.9x | 1.00 |
-| 1Kx256D | 238 ms | 234 ms | **21 ms** | 11.5x | 11.3x | 1.00 |
-| 500x1536D | 413 ms | 441 ms | **23 ms** | 17.8x | 19.0x | 1.00 |
+| 2Kx256D | 913 ms | 860 ms | **80 ms** | 11.4x | 10.8x | 1.00 |
+| 1Kx256D | 236 ms | 229 ms | **21 ms** | 11.3x | 10.9x | 1.00 |
+| 500x1536D | 417 ms | 443 ms | **26 ms** | 16.1x | 17.1x | 1.00 |
 
 ### Peak memory (RSS)
 
 | Config | sklearn | C-hdbscan | hdbscan-rs |
 |--------|--------:|----------:|-----------:|
-| 500x2D | 128 MB | 129 MB | **3 MB** |
-| 10Kx2D | 136 MB | 137 MB | **6 MB** |
-| 50Kx2D | 160 MB | 178 MB | **20 MB** |
-| 5Kx50D | 178 MB | 178 MB | 207 MB |
-| 2Kx256D | 178 MB | 178 MB | 60 MB |
-| 500x1536D | 178 MB | 178 MB | 44 MB |
+| 500x2D | 129 MB | 129 MB | **3 MB** |
+| 10Kx2D | 137 MB | 138 MB | **6 MB** |
+| 50Kx2D | 161 MB | 179 MB | **20 MB** |
+| 5Kx50D | 179 MB | 179 MB | 207 MB |
+| 2Kx256D | 179 MB | 179 MB | 56 MB |
+| 500x1536D | 179 MB | 179 MB | 41 MB |
 
 Python-based implementations carry ~128 MB baseline from the interpreter + NumPy + sklearn. Rust runs as a standalone binary with no runtime overhead.
 
@@ -82,6 +82,7 @@ Core distances use bounded kd-tree kNN for dim <= 10, ball tree kNN for dim 11-5
 ## Key optimizations
 
 - **SIMD auto-vectorization** -- 4-wide unrolled accumulators for distance computation (adaptive: simple loop for dim < 8, unrolled for dim >= 8)
+- **Fat LTO + target-cpu=native** -- cross-crate optimization of ndarray/matrixmultiply calls, AVX2 SIMD for distance computation
 - **Shared KnnHeap** -- deduplicated binary max-heap (O(log k) push) used by all tree-based kNN and fused core extraction
 - **Ball tree kNN** -- sqrt-free pruning with cached `sqrt(max_dist)`, pre-computed child centroid distances passed to avoid redundant SIMD ops
 - **SoA tree layout** -- bounding boxes (kd-tree) and centroids (ball tree) stored in contiguous Structure-of-Arrays format, eliminating per-node Vec allocations and improving cache locality in hot distance loops
