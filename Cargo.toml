@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "HDBSCAN clustering algorithm, compatible with scikit-learn"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/JasonLovesDoggo/hdbscan-rs"
+keywords = ["clustering", "hdbscan", "machine-learning", "density-based", "unsupervised"]
+categories = ["algorithms", "science"]
 
 [lib]
 name = "hdbscan_rs"
+crate-type = ["lib", "cdylib"]
 
 [dependencies]
 ndarray = "0.16"
@@ -15,6 +19,8 @@ thiserror = "2"
 ordered-float = "4"
 log = "0.4"
 serde = { version = "1", features = ["derive"], optional = true }
+pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
+numpy = { version = "0.24", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
@@ -28,3 +34,4 @@ harness = false
 [features]
 default = []
 serde = ["dep:serde"]
+python = ["dep:pyo3", "dep:numpy"]

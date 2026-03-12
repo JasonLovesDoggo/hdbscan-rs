@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "hdbscan-rs"
+version = "0.1.0"
+description = "High-performance HDBSCAN clustering, compatible with scikit-learn"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.20"]
+keywords = ["clustering", "hdbscan", "machine-learning", "density-based"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Repository = "https://github.com/JasonLovesDoggo/hdbscan-rs"
+
+[tool.maturin]
+features = ["python"]
+module-name = "hdbscan_rs"

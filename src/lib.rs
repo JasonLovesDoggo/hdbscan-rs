@@ -39,6 +39,9 @@ pub mod prediction;
 pub mod types;
 pub mod union_find;
 
+#[cfg(feature = "python")]
+mod python;
+
 // Re-exports
 pub use error::HdbscanError;
 pub use hdbscan::Hdbscan;
