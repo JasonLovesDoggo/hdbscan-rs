@@ -51,7 +51,7 @@ See the [Python README](README_PYTHON.md) for full API docs, migration guides, a
 - **Cluster centers** -optional centroid and/or medoid computation
 - **Five distance metrics** -Euclidean, Manhattan, Cosine, Minkowski(p), or bring your own precomputed distance matrix
 - **[Python bindings](README_PYTHON.md)** -drop-in replacement for sklearn and standalone hdbscan via PyO3 (`pip install hdbscan-rs`)
-- **WASM bindings** -run in the browser or Node.js via wasm-bindgen (462 KB optimized)
+- **WASM bindings** -run in the browser or Node.js via wasm-bindgen
 
 ## Performance
 
