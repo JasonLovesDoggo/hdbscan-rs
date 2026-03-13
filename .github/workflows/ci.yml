@@ -20,7 +20,12 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           targets: wasm32-unknown-unknown
+      - name: Get CPU model for cache key
+        id: cpu
+        run: echo "model=$(grep -m1 'model name' /proc/cpuinfo | cut -d':' -f2 | xargs)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v0-rust-${{ steps.cpu.outputs.model }}"
       - name: Check
         run: cargo check --all-features
       - name: Test
@@ -45,7 +50,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Get CPU model for cache key
+        id: cpu
+        run: echo "model=$(grep -m1 'model name' /proc/cpuinfo | cut -d':' -f2 | xargs)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v0-rust-${{ steps.cpu.outputs.model }}"
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
