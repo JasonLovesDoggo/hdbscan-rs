@@ -2,15 +2,15 @@
 
 A Rust implementation of [HDBSCAN](https://hdbscan.readthedocs.io/en/latest/) - Hierarchical Density-Based Spatial Clustering of Applications with Noise. Produces results compatible with scikit-learn's HDBSCAN, but runs significantly faster on large datasets thanks to a dual-tree Boruvka MST and tight pruning in native code.
 
+Also available as a **[drop-in Python replacement](README_PYTHON.md)** for sklearn and standalone hdbscan (`pip install hdbscan-rs`).
+
 ## Quick start
 
-Add it to your project:
+### Rust
 
 ```sh
 cargo add hdbscan-rs
 ```
-
-Cluster some data:
 
 ```rust
 use hdbscan_rs::{Hdbscan, HdbscanParams};
@@ -27,6 +27,22 @@ let labels = hdbscan.fit_predict(&data.view()).unwrap();
 // labels: [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
 ```
 
+### Python
+
+```sh
+pip install hdbscan-rs
+```
+
+```python
+# Drop-in replacement — just change the import
+from hdbscan_rs import HDBSCAN
+
+clusterer = HDBSCAN(min_cluster_size=15)
+labels = clusterer.fit_predict(data)
+```
+
+See the [Python README](README_PYTHON.md) for full API docs, migration guides, and BERTopic integration.
+
 ## Features
 
 - **sklearn-compatible output** -labels, probabilities, outlier scores, and condensed tree all match the reference Python implementation (ARI > 0.99 across fixture suite)
@@ -34,7 +50,7 @@ let labels = hdbscan.fit_predict(&data.view()).unwrap();
 - **Approximate prediction** -classify new points against a fitted model without re-clustering
 - **Cluster centers** -optional centroid and/or medoid computation
 - **Five distance metrics** -Euclidean, Manhattan, Cosine, Minkowski(p), or bring your own precomputed distance matrix
-- **Python bindings** -drop-in replacement for sklearn and standalone hdbscan via PyO3 (`pip install hdbscan-rs`)
+- **[Python bindings](README_PYTHON.md)** -drop-in replacement for sklearn and standalone hdbscan via PyO3 (`pip install hdbscan-rs`)
 - **WASM bindings** -run in the browser or Node.js via wasm-bindgen (462 KB optimized)
 
 ## Performance
