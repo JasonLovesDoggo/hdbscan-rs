@@ -18,7 +18,7 @@ fn main() {
         // kd-tree approach
         let t = Instant::now();
         let tree = hdbscan_rs::kdtree_bounded::BoundedKdTree::build(&data.view());
-        let (cd_kd, nn_kd) = hdbscan_rs::core_distance::compute_core_distances_with_bounded_kdtree(
+        let (cd_kd, _nn_kd) = hdbscan_rs::core_distance::compute_core_distances_with_bounded_kdtree(
             &tree,
             &data.view(),
             k,
@@ -27,7 +27,7 @@ fn main() {
 
         // Brute-force upper triangle
         let t = Instant::now();
-        let (cd_bf, nn_bf) =
+        let (cd_bf, _nn_bf) =
             hdbscan_rs::core_distance::compute_core_distances_brute_upper_triangle(&data.view(), k);
         let bf_ms = t.elapsed().as_secs_f64() * 1000.0;
 

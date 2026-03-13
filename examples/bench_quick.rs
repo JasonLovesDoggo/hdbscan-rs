@@ -17,7 +17,7 @@ fn bench_config(n: usize, dim: usize, mcs: usize, runs: usize) {
             ..Default::default()
         });
         let t = Instant::now();
-        let labels = h.fit_predict(&data.view()).unwrap();
+        let _labels = h.fit_predict(&data.view()).unwrap();
         times.push(t.elapsed().as_secs_f64() * 1000.0);
     }
     times.sort_by(|a, b| a.partial_cmp(b).unwrap());

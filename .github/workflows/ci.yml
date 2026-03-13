@@ -34,6 +34,8 @@ jobs:
         run: cargo check --features python
       - name: Check WASM target
         run: cargo check --target wasm32-unknown-unknown --features wasm --no-default-features
+        env:
+          RUSTFLAGS: ""  # override target-cpu=native which is invalid for wasm32
       - name: Clippy
         if: matrix.rust == 'stable'
         run: cargo clippy -- -D warnings

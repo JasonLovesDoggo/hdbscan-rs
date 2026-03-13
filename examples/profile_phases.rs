@@ -4,7 +4,7 @@ fn main() {
     for &(n, dim) in &[(5000, 10), (5000, 50), (50000, 10)] {
         let data = hdbscan_rs::bench_utils::make_blobs(n, dim, 5, 42);
         let min_samples = 10usize;
-        let k = min_samples.min(n);
+        let _k = min_samples.min(n);
 
         // Warmup
         {
@@ -57,13 +57,13 @@ fn main() {
             false,
             0.0,
         );
-        let probs = hdbscan_rs::membership::compute_probabilities(
+        let _probs = hdbscan_rs::membership::compute_probabilities(
             &condensed,
             &selection.selected_clusters,
             &labels,
             n,
         );
-        let outliers = hdbscan_rs::outlier::compute_outlier_scores(&condensed, n);
+        let _outliers = hdbscan_rs::outlier::compute_outlier_scores(&condensed, n);
         let t_rest = t3.elapsed();
 
         println!("{}x{}D breakdown:", n, dim);
