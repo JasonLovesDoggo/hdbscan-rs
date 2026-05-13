@@ -484,7 +484,7 @@ fn test_labels_are_consecutive() {
         // Every label from 0 to max_label should appear at least once
         for expected in 0..=max_label {
             assert!(
-                labels.iter().any(|&l| l == expected),
+                labels.contains(&expected),
                 "Label {} missing — labels should be consecutive from 0 to {}",
                 expected,
                 max_label

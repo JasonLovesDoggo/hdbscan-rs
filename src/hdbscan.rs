@@ -419,13 +419,13 @@ mod tests {
         assert_eq!(probs.len(), 10);
         // All probabilities should be in [0, 1]
         for &p in probs {
-            assert!(p >= 0.0 && p <= 1.0);
+            assert!((0.0..=1.0).contains(&p));
         }
 
         let scores = hdbscan.outlier_scores().unwrap();
         assert_eq!(scores.len(), 10);
         for &s in scores {
-            assert!(s >= 0.0 && s <= 1.0);
+            assert!((0.0..=1.0).contains(&s));
         }
     }
 

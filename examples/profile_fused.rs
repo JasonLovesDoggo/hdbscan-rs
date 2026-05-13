@@ -83,7 +83,7 @@ fn main() {
         edges.push((nearest[min_idx], min_idx, best_sq.sqrt()));
         active.swap_remove(best_pos);
 
-        if active.len() > 64 && active.len() % 128 == 0 {
+        if active.len() > 64 && active.len().is_multiple_of(128) {
             active.sort_unstable();
         }
 

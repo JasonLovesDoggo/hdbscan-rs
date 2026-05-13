@@ -190,7 +190,7 @@ fn run_comparison(name: &str) -> CompareResult {
     let rust_clusters = rust_labels
         .iter()
         .filter(|&&l| l >= 0)
-        .map(|&l| l)
+        .copied()
         .max()
         .map_or(0, |m| (m + 1) as usize);
     let rust_noise = rust_labels.iter().filter(|&&l| l == -1).count();

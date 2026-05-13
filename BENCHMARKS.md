@@ -23,6 +23,58 @@ Python:  3.12.1
 
 GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_comparison.py`.
 
+## Dense Post-Processing A/B
+
+Run the local Rust A/B benchmark:
+
+```sh
+cargo bench -p hdbscan-rs --bench benchmark
+```
+
+This benchmark generates deterministic Gaussian blob fixtures, fits HDBSCAN
+once to produce a condensed tree, then compares the old HashMap-style
+post-processing implementation against the current dense-storage
+implementation. It also runs a full-fit A/B where both paths share the same
+core-distance, MST, linkage, and condensed-tree work, but differ in cluster
+selection, labels, probabilities, and outlier scores. Output parity is checked
+for selected clusters, labels, probabilities, and outlier scores.
+
+Latest local run:
+
+- OS: Darwin arm64, kernel 24.6.0.
+- Rust: `rustc 1.92.0 (ded5c06cf 2025-12-08)`.
+
+### Isolated Post-Processing
+
+These rows isolate the optimized code paths after the condensed tree has already
+been built.
+
+| Dataset | Method | Condensed edges | Current `Hdbscan::fit` once | Legacy median | Current median | Speedup | Output delta |
+| ------- | ------ | --------------- | --------------------------- | ------------- | -------------- | ------- | ------------ |
+| 1,000 x 8, 5 blobs, `min_cluster_size=10` | EOM | 1,008 | 8.625 ms | 0.254863 ms | 0.024036 ms | 10.60x | 0 |
+| 5,000 x 8, 8 blobs, `min_cluster_size=25` | EOM | 5,014 | 13.569 ms | 1.187084 ms | 0.118404 ms | 10.03x | 0 |
+| 10,000 x 8, 10 blobs, `min_cluster_size=50` | EOM | 10,018 | 32.855 ms | 2.468583 ms | 0.264712 ms | 9.33x | 0 |
+| 10,000 x 8, 10 blobs, `min_cluster_size=50` | Leaf | 10,018 | 33.475 ms | 2.170889 ms | 0.215213 ms | 10.09x | 0 |
+
+### Full Fit
+
+Full-fit speedups are much smaller because core-distance and MST construction
+dominate end-to-end latency. These rows are the numbers to use for user-visible
+fit latency claims.
+
+| Dataset | Method | Legacy median | Current median | Speedup | Output delta |
+| ------- | ------ | ------------- | -------------- | ------- | ------------ |
+| 1,000 x 8, 5 blobs, `min_cluster_size=10` | EOM | 1.796 ms | 1.554 ms | 1.156x | 0 |
+| 5,000 x 8, 8 blobs, `min_cluster_size=25` | EOM | 11.252 ms | 10.166 ms | 1.107x | 0 |
+| 10,000 x 8, 10 blobs, `min_cluster_size=50` | EOM | 33.863 ms | 31.569 ms | 1.073x | 0 |
+| 10,000 x 8, 10 blobs, `min_cluster_size=50` | Leaf | 32.932 ms | 31.560 ms | 1.043x | 0 |
+
+The dense-storage cleanup is worth shipping for post-fit/post-MST work:
+cluster selection, label assignment, probabilities, and outlier scores are about
+9.3-10.6x faster on these deterministic fixtures. It is not a 10x full HDBSCAN
+fit win. End-to-end shared-pipeline fit improves by 1.04-1.16x because
+core-distance and MST construction still dominate runtime.
+
 ## Results
 
 ### Low-dimensional (2D blobs)

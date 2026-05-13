@@ -47,8 +47,8 @@ pub fn assign_labels(
         }
     }
 
-    // Build point lambda lookup
-    let mut point_lambda = vec![0.0f64; n_points];
+    // Build point lambda lookup (each point appears exactly once as a child).
+    let mut point_lambda = vec![0.0; n_points];
     for edge in condensed_tree {
         if edge.child < n_points {
             point_lambda[edge.child] = edge.lambda_val;
@@ -85,6 +85,7 @@ pub fn assign_labels(
                 labels[point] = label;
             }
         } else if let Some(threshold) = single_cluster_threshold {
+            // Single cluster case: check if point's lambda meets threshold
             let lambda = point_lambda[point];
             if lambda >= threshold {
                 let label = cluster_to_label[root_cluster];

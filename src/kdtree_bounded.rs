@@ -454,7 +454,7 @@ mod tests {
         let tree = BoundedKdTree::build(&data.view());
 
         // Verify all points appear exactly once across all leaves
-        let mut seen = vec![false; 50];
+        let mut seen = [false; 50];
         for node in &tree.nodes {
             if node.is_leaf {
                 for &idx in &tree.sorted_indices[node.idx_start..node.idx_end] {

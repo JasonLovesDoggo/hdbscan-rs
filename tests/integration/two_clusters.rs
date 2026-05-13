@@ -41,11 +41,11 @@ fn test_two_clusters_eom() {
     let label_a = labels[0];
     let label_b = labels[7];
     assert_ne!(label_a, label_b);
-    for i in 0..7 {
-        assert_eq!(labels[i], label_a, "point {} should be in cluster A", i);
+    for (i, label) in labels.iter().enumerate().take(7) {
+        assert_eq!(*label, label_a, "point {} should be in cluster A", i);
     }
-    for i in 7..14 {
-        assert_eq!(labels[i], label_b, "point {} should be in cluster B", i);
+    for (i, label) in labels.iter().enumerate().take(14).skip(7) {
+        assert_eq!(*label, label_b, "point {} should be in cluster B", i);
     }
 }
 
@@ -110,12 +110,12 @@ fn test_probabilities_in_range() {
 
     let probs = hdbscan.probabilities().unwrap();
     for &p in probs {
-        assert!(p >= 0.0 && p <= 1.0, "probability {} out of range", p);
+        assert!((0.0..=1.0).contains(&p), "probability {} out of range", p);
     }
 
     let scores = hdbscan.outlier_scores().unwrap();
     for &s in scores {
-        assert!(s >= 0.0 && s <= 1.0, "outlier score {} out of range", s);
+        assert!((0.0..=1.0).contains(&s), "outlier score {} out of range", s);
     }
 }
 

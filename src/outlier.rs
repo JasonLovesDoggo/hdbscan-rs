@@ -21,13 +21,18 @@ pub fn compute_outlier_scores(condensed_tree: &[CondensedTreeEdge], n_points: us
         .unwrap_or(0);
     let n_ids = max_id + 1;
 
-    // cluster_parent[c] = parent of cluster c (0 = no parent)
-    let mut cluster_parent = vec![usize::MAX; n_ids];
-    let mut max_lambda = vec![0.0f64; n_ids];
+    let node_count = n_ids;
+    let mut cluster_parent = vec![usize::MAX; node_count];
+    let mut cluster_present = vec![false; node_count];
+    let mut max_lambda = vec![0.0; node_count];
 
     for edge in condensed_tree {
+        if edge.parent < node_count {
+            cluster_present[edge.parent] = true;
+        }
         if edge.child >= n_points {
             cluster_parent[edge.child] = edge.parent;
+            cluster_present[edge.child] = true;
         }
     }
 
@@ -44,24 +49,25 @@ pub fn compute_outlier_scores(condensed_tree: &[CondensedTreeEdge], n_points: us
 
     // Compute max lambda per cluster from point fallouts
     for edge in condensed_tree {
-        if edge.child < n_points
-            && edge.lambda_val.is_finite()
-            && edge.lambda_val > max_lambda[edge.parent]
-        {
-            max_lambda[edge.parent] = edge.lambda_val;
+        if edge.child < n_points && edge.lambda_val.is_finite() {
+            let current = &mut max_lambda[edge.parent];
+            if edge.lambda_val > *current {
+                *current = edge.lambda_val;
+            }
         }
     }
 
-    // Collect and sort clusters by ID descending (leaves first) for bottom-up propagation
-    let mut sorted_clusters: Vec<usize> = (n_points..n_ids)
-        .filter(|&c| cluster_parent[c] != usize::MAX || c == n_points)
-        .collect();
-    sorted_clusters.sort_unstable_by(|a, b| b.cmp(a));
-
-    for &cluster in &sorted_clusters {
-        let parent = cluster_parent[cluster];
-        if parent != usize::MAX && max_lambda[cluster] > max_lambda[parent] {
-            max_lambda[parent] = max_lambda[cluster];
+    // Propagate max lambda up the tree
+    for cluster in (n_points..node_count).rev() {
+        if cluster_present[cluster] {
+            let parent = cluster_parent[cluster];
+            if parent != usize::MAX {
+                let child_max = max_lambda[cluster];
+                let parent_max = &mut max_lambda[parent];
+                if child_max > *parent_max {
+                    *parent_max = child_max;
+                }
+            }
         }
     }
 
@@ -73,6 +79,7 @@ pub fn compute_outlier_scores(condensed_tree: &[CondensedTreeEdge], n_points: us
         if parent != usize::MAX {
             let pl = point_lambda[point];
             let ml = max_lambda[parent];
+
             if ml > 0.0 && ml.is_finite() {
                 scores[point] = ((ml - pl) / ml).clamp(0.0, 1.0);
             }
