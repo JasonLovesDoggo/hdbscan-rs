@@ -1,6 +1,6 @@
 use crate::params::ClusterSelectionMethod;
 use crate::types::CondensedTreeEdge;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Result of cluster selection: which condensed tree cluster IDs are selected.
 pub struct ClusterSelectionResult {
@@ -25,37 +25,54 @@ pub fn select_clusters(
         };
     }
 
-    // Identify all cluster nodes (IDs >= n_points) that appear as parents or cluster children
-    let mut all_clusters: HashSet<usize> = HashSet::new();
-    let mut children_of: HashMap<usize, Vec<usize>> = HashMap::new(); // cluster -> cluster children
-    let mut cluster_birth_lambda: HashMap<usize, f64> = HashMap::new();
+    // Cluster ids are dense enough to use id-indexed storage: points are
+    // `0..n_points`, condensed clusters start at `n_points`, and each merge
+    // introduces at most one new cluster id.
+    let node_count = condensed_tree
+        .iter()
+        .map(|edge| edge.parent.max(edge.child))
+        .max()
+        .map_or(n_points + 1, |max_node| max_node + 1);
+    let mut cluster_present = vec![false; node_count];
+    let mut child_counts = vec![0usize; node_count];
+    let mut cluster_birth_lambda = vec![0.0; node_count];
+    let mut cluster_birth_seen = vec![false; node_count];
 
     for edge in condensed_tree {
-        all_clusters.insert(edge.parent);
+        cluster_present[edge.parent] = true;
         if edge.child >= n_points {
-            all_clusters.insert(edge.child);
-            children_of.entry(edge.parent).or_default().push(edge.child);
+            cluster_present[edge.child] = true;
+            child_counts[edge.parent] += 1;
             // A cluster's birth lambda is the lambda at which it splits from its parent
-            cluster_birth_lambda
-                .entry(edge.child)
-                .and_modify(|v| {
-                    if edge.lambda_val < *v {
-                        *v = edge.lambda_val;
-                    }
-                })
-                .or_insert(edge.lambda_val);
+            if !cluster_birth_seen[edge.child] || edge.lambda_val < cluster_birth_lambda[edge.child]
+            {
+                cluster_birth_lambda[edge.child] = edge.lambda_val;
+                cluster_birth_seen[edge.child] = true;
+            }
         }
     }
 
     // Root cluster birth lambda is 0
-    let root = *all_clusters.iter().min().unwrap_or(&n_points);
-    cluster_birth_lambda.entry(root).or_insert(0.0);
+    let root = cluster_present
+        .iter()
+        .enumerate()
+        .skip(n_points)
+        .find_map(|(cluster, &present)| present.then_some(cluster))
+        .unwrap_or(n_points);
+    cluster_birth_lambda[root] = 0.0;
+    let children_of = ClusterChildren::new(condensed_tree, n_points, child_counts);
+    let all_clusters: Vec<usize> = cluster_present
+        .iter()
+        .enumerate()
+        .skip(n_points)
+        .filter_map(|(cluster, &present)| present.then_some(cluster))
+        .collect();
 
     // Find leaf clusters (no cluster children)
     let leaf_clusters: HashSet<usize> = all_clusters
         .iter()
-        .filter(|c| !children_of.contains_key(c))
         .copied()
+        .filter(|&cluster| children_of.children(cluster).is_empty())
         .collect();
 
     let selected = match method {
@@ -87,9 +104,9 @@ pub fn select_clusters(
     // Compute cluster_persistence for selected clusters.
     // persistence = 1/birth_lambda - 1/death_lambda for each selected cluster.
     // Death lambda is the max lambda of any edge with that cluster as parent.
-    let mut cluster_death_lambda: HashMap<usize, f64> = HashMap::new();
+    let mut cluster_death_lambda = vec![0.0; node_count];
     for edge in condensed_tree {
-        let entry = cluster_death_lambda.entry(edge.parent).or_insert(0.0f64);
+        let entry = &mut cluster_death_lambda[edge.parent];
         if edge.lambda_val > *entry {
             *entry = edge.lambda_val;
         }
@@ -102,8 +119,8 @@ pub fn select_clusters(
     let cluster_persistence: Vec<f64> = sorted_selected
         .iter()
         .map(|&c| {
-            let birth = *cluster_birth_lambda.get(&c).unwrap_or(&0.0);
-            let death = *cluster_death_lambda.get(&c).unwrap_or(&0.0);
+            let birth = cluster_birth_lambda[c];
+            let death = cluster_death_lambda[c];
             let inv_birth = if birth > 0.0 {
                 1.0 / birth
             } else {
@@ -120,6 +137,39 @@ pub fn select_clusters(
     }
 }
 
+struct ClusterChildren {
+    offsets: Vec<usize>,
+    children: Vec<usize>,
+}
+
+impl ClusterChildren {
+    fn new(condensed_tree: &[CondensedTreeEdge], n_points: usize, mut counts: Vec<usize>) -> Self {
+        let mut offsets = Vec::with_capacity(counts.len() + 1);
+        offsets.push(0);
+        for &count in &counts {
+            offsets.push(offsets[offsets.len() - 1] + count);
+        }
+
+        let mut children = vec![0usize; offsets[offsets.len() - 1]];
+        counts.copy_from_slice(&offsets[..offsets.len() - 1]);
+        for edge in condensed_tree {
+            if edge.child >= n_points {
+                children[counts[edge.parent]] = edge.child;
+                counts[edge.parent] += 1;
+            }
+        }
+
+        ClusterChildren { offsets, children }
+    }
+
+    fn children(&self, cluster: usize) -> &[usize] {
+        if cluster + 1 >= self.offsets.len() {
+            return &[];
+        }
+        &self.children[self.offsets[cluster]..self.offsets[cluster + 1]]
+    }
+}
+
 /// EOM (Excess of Mass) cluster selection.
 /// Maximizes total cluster stability.
 ///
@@ -131,41 +181,43 @@ pub fn select_clusters(
 fn eom_selection(
     condensed_tree: &[CondensedTreeEdge],
     n_points: usize,
-    all_clusters: &HashSet<usize>,
-    children_of: &HashMap<usize, Vec<usize>>,
+    all_clusters: &[usize],
+    children_of: &ClusterChildren,
     _leaf_clusters: &HashSet<usize>,
     allow_single_cluster: bool,
 ) -> HashSet<usize> {
-    let root = *all_clusters.iter().min().unwrap_or(&n_points);
+    let root = all_clusters.iter().copied().min().unwrap_or(n_points);
 
     // Compute birth lambda for each node (point or cluster).
     // In sklearn: births[child] = edge.value for each edge, then births[root] = 0.
     // Each child appears exactly once as a child in the condensed tree.
-    let mut births: HashMap<usize, f64> = HashMap::new();
+    let node_count = condensed_tree
+        .iter()
+        .map(|edge| edge.parent.max(edge.child))
+        .max()
+        .map_or(n_points + 1, |max_node| max_node + 1);
+    let mut births = vec![0.0; node_count];
     for edge in condensed_tree {
-        births.insert(edge.child, edge.lambda_val);
+        births[edge.child] = edge.lambda_val;
     }
-    births.insert(root, 0.0);
+    births[root] = 0.0;
 
     // Compute stability for each cluster.
     // sklearn: stability[parent] += (lambda_val - births[parent]) * child_size
     // for ALL edges (both point-level and cluster-level).
-    let mut stability: HashMap<usize, f64> = HashMap::new();
-    for &c in all_clusters {
-        stability.insert(c, 0.0);
-    }
+    let mut stability = vec![0.0; node_count];
 
     for edge in condensed_tree {
         let parent = edge.parent;
-        let bl = *births.get(&parent).unwrap_or(&0.0);
+        let bl = births[parent];
         let contribution = (edge.lambda_val - bl) * edge.child_size as f64;
-        *stability.entry(parent).or_insert(0.0) += contribution;
+        stability[parent] += contribution;
     }
 
     // Build the node list for EOM processing.
     // sklearn: if allow_single_cluster, include all; otherwise exclude root.
     let mut node_list: Vec<usize> = if allow_single_cluster {
-        all_clusters.iter().copied().collect()
+        all_clusters.to_vec()
     } else {
         all_clusters
             .iter()
@@ -177,42 +229,43 @@ fn eom_selection(
     node_list.sort_unstable_by(|a, b| b.cmp(a));
 
     // is_cluster tracks which nodes are selected (all start as true)
-    let mut is_cluster: HashMap<usize, bool> = HashMap::new();
+    let mut is_cluster = vec![false; node_count];
     for &c in &node_list {
-        is_cluster.insert(c, true);
+        is_cluster[c] = true;
     }
 
     // Bottom-up pass: for each node, compare its stability to sum of children's stability.
     // If children win, set node to not-a-cluster and propagate children's stability up.
     // If node wins, deselect all descendants.
     // Note: stability dict is mutated in place (like sklearn).
+    let mut descendant_stack = Vec::new();
     for &node in &node_list {
-        if let Some(children) = children_of.get(&node) {
-            let subtree_stability: f64 = children
-                .iter()
-                .map(|c| *stability.get(c).unwrap_or(&0.0))
-                .sum();
+        let children = children_of.children(node);
+        if !children.is_empty() {
+            let subtree_stability: f64 = children.iter().map(|&c| stability[c]).sum();
 
-            let own_stability = *stability.get(&node).unwrap_or(&0.0);
+            let own_stability = stability[node];
 
             if subtree_stability > own_stability {
                 // Children are collectively better
-                is_cluster.insert(node, false);
-                stability.insert(node, subtree_stability);
+                is_cluster[node] = false;
+                stability[node] = subtree_stability;
             } else {
                 // This node is better: deselect all descendants
-                let descendants = bfs_descendants(node, children_of);
-                for sub_node in descendants {
-                    is_cluster.insert(sub_node, false);
-                }
+                mark_descendants_not_cluster(
+                    node,
+                    children_of,
+                    &mut is_cluster,
+                    &mut descendant_stack,
+                );
             }
         }
     }
 
-    let selected: HashSet<usize> = is_cluster
+    let selected: HashSet<usize> = node_list
         .iter()
-        .filter(|(_, &v)| v)
-        .map(|(&k, _)| k)
+        .copied()
+        .filter(|&cluster| is_cluster[cluster])
         .collect();
 
     // Handle allow_single_cluster edge case:
@@ -224,20 +277,18 @@ fn eom_selection(
     selected
 }
 
-/// BFS to find all descendants of a node in the cluster tree (excluding the node itself).
-fn bfs_descendants(node: usize, children_of: &HashMap<usize, Vec<usize>>) -> Vec<usize> {
-    let mut result = Vec::new();
-    let mut queue = Vec::new();
-    if let Some(children) = children_of.get(&node) {
-        queue.extend(children.iter().copied());
+fn mark_descendants_not_cluster(
+    node: usize,
+    children_of: &ClusterChildren,
+    is_cluster: &mut [bool],
+    stack: &mut Vec<usize>,
+) {
+    stack.clear();
+    stack.extend(children_of.children(node).iter().copied());
+    while let Some(current) = stack.pop() {
+        is_cluster[current] = false;
+        stack.extend(children_of.children(current).iter().copied());
     }
-    while let Some(current) = queue.pop() {
-        result.push(current);
-        if let Some(children) = children_of.get(&current) {
-            queue.extend(children.iter().copied());
-        }
-    }
-    result
 }
 
 /// Apply epsilon merging: merge selected clusters whose split distance < epsilon.
@@ -245,8 +296,8 @@ fn apply_epsilon_merging(
     selected: &HashSet<usize>,
     _condensed_tree: &[CondensedTreeEdge],
     _n_points: usize,
-    children_of: &HashMap<usize, Vec<usize>>,
-    birth_lambda: &HashMap<usize, f64>,
+    children_of: &ClusterChildren,
+    birth_lambda: &[f64],
     epsilon: f64,
 ) -> HashSet<usize> {
     let epsilon_lambda = if epsilon > 0.0 {
@@ -269,13 +320,14 @@ fn apply_epsilon_merging(
         changed = false;
         let current = result.clone();
         for &cluster in &current {
-            if let Some(children) = children_of.get(&cluster) {
+            let children = children_of.children(cluster);
+            if !children.is_empty() {
                 // Check if all children are selected and born at lambda > epsilon_lambda
                 let all_children_selected_and_fine = children.iter().all(|c| {
                     result.contains(c)
-                        && birth_lambda.get(c).copied().unwrap_or(0.0) > epsilon_lambda
+                        && birth_lambda.get(*c).copied().unwrap_or(0.0) > epsilon_lambda
                 });
-                if all_children_selected_and_fine && !children.is_empty() {
+                if all_children_selected_and_fine {
                     // Merge: select parent instead of children
                     for &child in children {
                         result.remove(&child);

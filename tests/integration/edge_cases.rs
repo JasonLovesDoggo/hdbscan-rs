@@ -196,8 +196,8 @@ fn test_single_root_cluster_with_epsilon_no_panic() {
     let labels = hdbscan.fit_predict(&data.view()).unwrap();
     assert_eq!(labels.len(), 4);
     // At least some points should be clustered
-    let n_clusters: HashSet<_> = labels.iter().filter(|&&l| l >= 0).map(|&l| l).collect();
-    assert!(n_clusters.len() >= 1, "Should find at least 1 cluster");
+    let n_clusters: HashSet<_> = labels.iter().filter(|&&l| l >= 0).copied().collect();
+    assert!(!n_clusters.is_empty(), "Should find at least 1 cluster");
 }
 
 /// Epsilon merging: without epsilon we get multiple clusters, with large epsilon
@@ -227,7 +227,7 @@ fn test_epsilon_merges_close_clusters() {
     };
     let mut hdb1 = Hdbscan::new(params_no_eps);
     let labels1 = hdb1.fit_predict(&data.view()).unwrap();
-    let clusters1: HashSet<_> = labels1.iter().filter(|&&l| l >= 0).map(|&l| l).collect();
+    let clusters1: HashSet<_> = labels1.iter().filter(|&&l| l >= 0).copied().collect();
 
     // With large epsilon — should merge close clusters
     let params_eps = HdbscanParams {
@@ -238,7 +238,7 @@ fn test_epsilon_merges_close_clusters() {
     };
     let mut hdb2 = Hdbscan::new(params_eps);
     let labels2 = hdb2.fit_predict(&data.view()).unwrap();
-    let clusters2: HashSet<_> = labels2.iter().filter(|&&l| l >= 0).map(|&l| l).collect();
+    let clusters2: HashSet<_> = labels2.iter().filter(|&&l| l >= 0).copied().collect();
 
     // Large epsilon should result in same or fewer clusters
     assert!(
