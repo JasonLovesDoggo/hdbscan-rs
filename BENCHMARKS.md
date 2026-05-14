@@ -21,7 +21,11 @@ Rust:    rustc 1.94.0 (4a4ef493e 2026-03-02)
 Python:  3.12.1
 ```
 
-GitHub Codespace, Standard (4-core). Reproducible via `python3 tests/perf_comparison.py`.
+GitHub Codespace, Standard (4-core). Reproducible via:
+
+```sh
+RUSTFLAGS="-C target-cpu=native" python3 tests/perf_comparison.py
+```
 
 ## Dense Post-Processing A/B
 

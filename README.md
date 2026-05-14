@@ -55,7 +55,7 @@ See the [Python README](README_PYTHON.md) for full API docs, migration guides, a
 
 ## Performance
 
-Best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Data is `make_blobs`, `min_cluster_size=10`.
+Best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Data is `make_blobs`, `min_cluster_size=10`. Peak native benchmark runs use `RUSTFLAGS="-C target-cpu=native"` explicitly.
 
 | Config    |   sklearn | C-hdbscan | fast-hdbscan |  hdbscan-rs | vs sklearn | vs fast |
 | --------- | --------: | --------: | -----------: | ----------: | ---------: | ------: |
