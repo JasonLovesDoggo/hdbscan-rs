@@ -55,7 +55,7 @@ See the [Python README](README_PYTHON.md) for full API docs, migration guides, a
 
 ## Performance
 
-Best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Data is `make_blobs`, `min_cluster_size=10`.
+Best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Data is `make_blobs`, `min_cluster_size=10`. Peak native benchmark runs use `RUSTFLAGS="-C target-cpu=native"` explicitly.
 
 | Config    |   sklearn | C-hdbscan | fast-hdbscan |  hdbscan-rs | vs sklearn | vs fast |
 | --------- | --------: | --------: | -----------: | ----------: | ---------: | ------: |
@@ -68,6 +68,21 @@ Best-of-3 wall time on a 4-core AMD EPYC (GitHub Codespace). Data is `make_blobs
 | 500x1536D |    412 ms |    439 ms |      80.7 ms |   **27 ms** |      15.1x |    3.0x |
 
 Memory: 3-41 MB (Rust) vs 120-150 MB (sklearn) vs 121-169 MB (C-hdbscan) vs 457-470 MB (fast-hdbscan + Numba JIT).
+
+### Post-processing latency
+
+The current dense-storage post-processing path is 9.3-10.6x faster than the old
+HashMap-style implementation for cluster selection, label assignment,
+probabilities, and outlier scores. This is not a 10x full `fit()` win:
+core-distance and MST construction still dominate total runtime. The same A/B
+benchmark measures a 1.04-1.16x full shared-pipeline `fit` speedup.
+
+| Config | Method | Current post-process | Current full fit | Post-process speedup | Full-fit speedup |
+| ------ | ------ | -------------------: | ---------------: | -------------------: | ---------------: |
+| 1Kx8D  | EOM    |            0.0240 ms |          1.554 ms |               10.60x |            1.16x |
+| 5Kx8D  | EOM    |            0.1184 ms |         10.166 ms |               10.03x |            1.11x |
+| 10Kx8D | EOM    |            0.2647 ms |         31.569 ms |                9.33x |            1.07x |
+| 10Kx8D | Leaf   |            0.2152 ms |         31.560 ms |               10.09x |            1.04x |
 
 See [BENCHMARKS.md](BENCHMARKS.md) for full results, machine specs, methodology, and analysis.
 
